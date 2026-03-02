@@ -1,0 +1,24 @@
+# Strategy A: Crypto Momentum
+# Upbit KRW 상위 10-15개 코인 중 20일 모멘텀 상위 3-5개 매수
+name: crypto_momentum
+exchange: upbit
+market: KRW
+rebalance_frequency: weekly
+
+parameters:
+  lookback_days: 20          # 모멘텀 측정 기간
+  holding_days: 7            # 홀딩 기간 (주간 리밸런싱)
+  top_n: 3                   # 상위 N개 코인 매수
+  universe_size: 15          # 상위 N개 코인에서 선정
+  min_volume_krw: 1000000000 # 최소 일일 거래량 10억 KRW (유동성 필터)
+
+# Transaction costs
+costs:
+  commission_rate: 0.0025    # 0.25% (Upbit maker/taker)
+  slippage_rate: 0.0015      # 0.15% 예상 슬리피지
+
+# Go/No-Go criteria (backtest minimum)
+validation:
+  min_sharpe: 0.8
+  max_drawdown: 0.20
+  min_profit_factor: 1.3

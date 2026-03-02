@@ -1,0 +1,31 @@
+# Strategy C: Dual Momentum (Cross-Asset)
+# Gary Antonacci 기반 — BTC/KRW vs SPY 상대 모멘텀
+name: dual_momentum
+exchange: upbit+alpaca
+market: cross_asset
+rebalance_frequency: monthly
+
+parameters:
+  lookback_days: 60          # 모멘텀 측정 기간 (12주)
+  rebalance_day: 1           # 월초 리밸런싱
+
+assets:
+  offensive:
+    - symbol: KRW-BTC
+      exchange: upbit
+    - symbol: SPY
+      exchange: alpaca
+  defensive:
+    - symbol: TLT
+      exchange: alpaca
+
+# Transaction costs (blended)
+costs:
+  commission_rate: 0.00125   # 가중 평균 수수료
+  slippage_rate: 0.001       # 가중 평균 슬리피지
+
+# Go/No-Go criteria
+validation:
+  min_sharpe: 0.8
+  max_drawdown: 0.20
+  min_profit_factor: 1.3

@@ -1,0 +1,30 @@
+# Strategy B: US ETF Mean Reversion
+# SPY, QQQ, TLT, GLD, IEF 바스켓에서 z-score 기반 평균회귀
+name: etf_mean_reversion
+exchange: alpaca
+market: US
+rebalance_frequency: weekly
+
+parameters:
+  lookback_days: 20          # z-score 측정 기간
+  z_entry_threshold: -1.5    # 매수 진입 z-score
+  z_exit_threshold: 1.5      # 매도 청산 z-score
+  holding_days: 7            # 홀딩 기간
+
+universe:
+  - SPY   # S&P 500
+  - QQQ   # Nasdaq 100
+  - TLT   # 20+ Year Treasury
+  - GLD   # Gold
+  - IEF   # 7-10 Year Treasury
+
+# Transaction costs
+costs:
+  commission_rate: 0.0       # Alpaca 무수수료
+  slippage_rate: 0.0005      # 0.05% 예상 슬리피지
+
+# Go/No-Go criteria
+validation:
+  min_sharpe: 0.8
+  max_drawdown: 0.20
+  min_profit_factor: 1.3
