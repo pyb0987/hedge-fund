@@ -66,3 +66,7 @@ source = ["hedgefund"]
 [tool.coverage.report]
 fail_under = 80
 show_missing = true
+omit = [
+    "src/hedgefund/data/providers/*",  # external API — integration tests
+    "src/hedgefund/data/protocols.py",  # protocol definition only
+]
