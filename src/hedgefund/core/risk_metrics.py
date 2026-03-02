@@ -87,17 +87,20 @@ def calmar_ratio(returns: NDArray[np.float64]) -> float:
     return ann_ret / mdd
 
 
+MAX_PROFIT_FACTOR = 100.0  # Cap to prevent inf in comparisons
+
+
 def profit_factor(returns: NDArray[np.float64]) -> float:
     """Profit Factor = sum(gains) / abs(sum(losses)).
 
-    > 1.0 means profitable. Returns 0.0 if no losses.
+    > 1.0 means profitable. Capped at MAX_PROFIT_FACTOR to avoid inf.
     """
     gains = returns[returns > 0]
     losses = returns[returns < 0]
     total_loss = float(np.abs(np.sum(losses)))
     if total_loss == 0.0:
-        return float("inf") if len(gains) > 0 else 0.0
-    return float(np.sum(gains)) / total_loss
+        return MAX_PROFIT_FACTOR if len(gains) > 0 else 0.0
+    return min(float(np.sum(gains)) / total_loss, MAX_PROFIT_FACTOR)
 
 
 def rolling_drawdown(returns: NDArray[np.float64]) -> NDArray[np.float64]:

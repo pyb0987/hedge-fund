@@ -46,8 +46,11 @@ class BacktestResult:
         return self.total_commission + self.total_slippage
 
     @property
-    def net_return(self) -> float:
-        return self.total_return - self.total_costs
+    def total_cost_pct(self) -> float:
+        """Total costs as percentage of initial capital (for return comparison)."""
+        if self.equity_curve.iloc[0] == 0:
+            return 0.0
+        return self.total_costs / self.equity_curve.iloc[0]
 
 
 @dataclass(frozen=True)
@@ -103,9 +106,10 @@ def run_backtest(
     trade_threshold = 0.01
     num_trades = int((weight_changes > trade_threshold).sum().sum())
 
-    # Compute total costs
-    total_commission = float((daily_turnover * config.commission_rate).sum() * config.initial_capital)
-    total_slippage = float((daily_turnover * config.slippage_rate).sum() * config.initial_capital)
+    # Total costs in capital terms — daily_costs are already in return-space (fraction),
+    # so multiply cumulative cost fraction by initial capital for reporting.
+    total_commission = float((daily_turnover * config.commission_rate).sum()) * config.initial_capital
+    total_slippage = float((daily_turnover * config.slippage_rate).sum()) * config.initial_capital
 
     return BacktestResult(
         equity_curve=equity_curve,

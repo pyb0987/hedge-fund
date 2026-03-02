@@ -98,9 +98,11 @@ def run_walk_forward(
             {col: is_prices[[col]] for col in is_prices.columns},
             is_prices.index,
         )
+        # CRITICAL: OOS weights must be generated using ONLY IS data for fitting.
+        # We pass IS data for the strategy to learn from, but request weights
+        # for OOS dates. The strategy must extrapolate, not peek at OOS prices.
         oos_weights = weight_generator(
-            # Use IS data for parameter fitting, but OOS prices for evaluation
-            {col: prices.iloc[is_start_idx:oos_end_idx][[col]] for col in prices.columns},
+            {col: is_prices[[col]] for col in is_prices.columns},
             oos_prices.index,
         )
 

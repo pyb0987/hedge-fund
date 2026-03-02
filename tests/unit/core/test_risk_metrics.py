@@ -97,7 +97,7 @@ class TestProfitFactor:
 
     def test_all_gains(self) -> None:
         returns = np.array([0.01, 0.02, 0.005])
-        assert risk_metrics.profit_factor(returns) == float("inf")
+        assert risk_metrics.profit_factor(returns) == risk_metrics.MAX_PROFIT_FACTOR
 
     def test_no_gains_no_losses(self) -> None:
         returns = np.array([0.0, 0.0, 0.0])

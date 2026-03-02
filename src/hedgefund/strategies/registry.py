@@ -10,13 +10,14 @@ from hedgefund.config.schemas import (
 from hedgefund.core.exceptions import StrategyNotFoundError
 from hedgefund.strategies.base import Strategy
 from hedgefund.strategies.crypto_momentum import CryptoMomentumStrategy
+from hedgefund.strategies.dual_momentum import DualMomentumStrategy
+from hedgefund.strategies.etf_mean_reversion import EtfMeanReversionStrategy
 
 # Registry mapping: strategy name → (strategy class, config class)
 _REGISTRY: dict[str, tuple[type, type]] = {
     "crypto_momentum": (CryptoMomentumStrategy, CryptoMomentumConfig),
-    # Phase 2:
-    # "etf_mean_reversion": (EtfMeanReversionStrategy, EtfMeanReversionConfig),
-    # "dual_momentum": (DualMomentumStrategy, DualMomentumConfig),
+    "etf_mean_reversion": (EtfMeanReversionStrategy, EtfMeanReversionConfig),
+    "dual_momentum": (DualMomentumStrategy, DualMomentumConfig),
 }
 
 
