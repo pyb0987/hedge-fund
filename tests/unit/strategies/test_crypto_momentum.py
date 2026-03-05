@@ -1,6 +1,6 @@
 """Tests for crypto momentum strategy."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -126,3 +126,86 @@ class TestCryptoMomentumStrategy:
 
         # Weights should sum to <= 1
         assert (post_lookback.sum(axis=1) <= 1.0 + 1e-9).all()
+
+    def test_backtest_weights_weekly_rebalance(self) -> None:
+        """Verify weights only change on rebalance days (every holding_days)."""
+        config = CryptoMomentumConfig(lookback_days=10, top_n=1, holding_days=7)
+        strategy = CryptoMomentumStrategy(config=config, universe=["A", "B"])
+
+        rng = np.random.default_rng(42)
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        data = {
+            "A": pd.DataFrame(
+                {"close": 100 * np.cumprod(1 + rng.normal(0.01, 0.02, 40))},
+                index=dates,
+            ),
+            "B": pd.DataFrame(
+                {"close": 100 * np.cumprod(1 + rng.normal(0.005, 0.02, 40))},
+                index=dates,
+            ),
+        }
+        weights = strategy.backtest_weights(data, dates)
+
+        # Weights should be stable between rebalances (carry forward)
+        post_lookback = weights.iloc[10:]
+        weight_changes = post_lookback.diff().fillna(0.0).abs().sum(axis=1)
+
+        # Count how many days have weight changes
+        change_days = (weight_changes > 1e-10).sum()
+        total_days = len(post_lookback)
+
+        # With holding_days=7, changes should happen roughly every 7 days
+        # So change_days should be much less than total_days
+        assert change_days < total_days * 0.3  # at most 30% of days have changes
+
+    def test_set_universe_clamps_to_config_size(self) -> None:
+        """set_universe should respect universe_size config limit."""
+        config = CryptoMomentumConfig(universe_size=5)  # min valid = 5
+        strategy = CryptoMomentumStrategy(config=config)
+        strategy.set_universe(["A", "B", "C", "D", "E", "F", "G", "H"])
+        assert len(strategy.get_universe()) == 5
+
+    def test_rebalance_gate_first_call(
+        self, strategy: CryptoMomentumStrategy, mock_data: dict[str, pd.DataFrame]
+    ) -> None:
+        """First call always generates signals (no prior rebalance)."""
+        assert strategy.last_rebalance_date is None
+        signals = strategy.generate_signals(mock_data, datetime(2024, 2, 10))
+        assert len(signals) > 0
+        assert strategy.last_rebalance_date == datetime(2024, 2, 10)
+
+    def test_rebalance_gate_blocks_within_holding_days(
+        self, strategy: CryptoMomentumStrategy, mock_data: dict[str, pd.DataFrame]
+    ) -> None:
+        """Signals blocked within holding_days (7 days)."""
+        first_time = datetime(2024, 2, 10)
+        strategy.generate_signals(mock_data, first_time)
+
+        # 3 days later — should return empty (hold)
+        second_time = first_time + timedelta(days=3)
+        signals = strategy.generate_signals(mock_data, second_time)
+        assert len(signals) == 0
+
+    def test_rebalance_gate_allows_after_holding_days(
+        self, strategy: CryptoMomentumStrategy, mock_data: dict[str, pd.DataFrame]
+    ) -> None:
+        """Signals generated after holding_days elapsed."""
+        first_time = datetime(2024, 2, 10)
+        strategy.generate_signals(mock_data, first_time)
+
+        # 7 days later — should rebalance
+        next_time = first_time + timedelta(days=7)
+        signals = strategy.generate_signals(mock_data, next_time)
+        assert len(signals) > 0
+        assert strategy.last_rebalance_date == next_time
+
+    def test_rebalance_gate_state_setter(self) -> None:
+        """last_rebalance_date setter works for state restoration."""
+        config = CryptoMomentumConfig(lookback_days=5, top_n=1, holding_days=7)
+        strategy = CryptoMomentumStrategy(config=config, universe=["A"])
+
+        restored_date = datetime(2024, 2, 10)
+        strategy.last_rebalance_date = restored_date
+        assert strategy.last_rebalance_date == restored_date
+        assert not strategy.should_rebalance(restored_date + timedelta(days=3))
+        assert strategy.should_rebalance(restored_date + timedelta(days=7))

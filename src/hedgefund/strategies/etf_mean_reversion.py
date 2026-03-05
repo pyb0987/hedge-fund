@@ -99,22 +99,32 @@ class EtfMeanReversionStrategy(BaseStrategy):
         return signals
 
     def _compute_rolling_zscore(self, prices: pd.Series) -> float:
-        """Compute z-score of cumulative return over lookback window."""
-        lookback = self._config.lookback_days
-        returns = prices.pct_change().dropna()
+        """Compute z-score of cumulative log-return over lookback window.
 
-        if len(returns) < lookback:
+        Uses log returns for mathematical consistency:
+        sum(log_returns) is the exact log of the price ratio,
+        and CLT gives us mean/std scaling for the sum.
+        """
+        lookback = self._config.lookback_days
+
+        if len(prices) < lookback + 1:
             return 0.0
 
-        window = returns.iloc[-lookback:]
-        cumulative_return = float((1 + window).prod() - 1)
+        # Log returns: ln(P_t / P_{t-1})
+        log_returns = np.log(prices / prices.shift(1)).dropna()
+
+        if len(log_returns) < lookback:
+            return 0.0
+
+        window = log_returns.iloc[-lookback:]
+        cumulative_log_return = float(window.sum())
 
         mean = float(window.mean()) * lookback
         std = float(window.std()) * np.sqrt(lookback)
 
         if std == 0:
             return 0.0
-        return (cumulative_return - mean) / std
+        return (cumulative_log_return - mean) / std
 
     def _zscore_to_strength(self, z: float, is_entry: bool) -> float:
         """Convert z-score magnitude to signal strength (0-1).
@@ -159,7 +169,8 @@ class EtfMeanReversionStrategy(BaseStrategy):
                 if len(available) < lookback + 1:
                     continue
 
-                z = self.compute_zscore(available["close"], lookback)
+                # Use same z-score as generate_signals() for consistency
+                z = self._compute_rolling_zscore(available["close"])
 
                 if z <= z_entry:
                     in_position[sym] = True

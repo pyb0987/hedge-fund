@@ -73,6 +73,7 @@ class Order:
     quantity: float
     strategy_name: str
     timestamp: datetime
+    price: float | None = None  # current market price at order creation
     status: OrderStatus = OrderStatus.PENDING
     limit_price: float | None = None
     filled_price: float | None = None

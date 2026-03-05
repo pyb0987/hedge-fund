@@ -75,3 +75,27 @@ class TestCovarianceMatrix:
         cov = compute_covariance_matrix(uncorrelated_returns)
         for i in range(3):
             assert cov[i][i] > 0
+
+
+class TestCorrelationNaN:
+    def test_constant_returns_no_nan(self) -> None:
+        """Constant returns (std=0) should return 0 correlation, not NaN."""
+        returns = {
+            "strategy_a": np.zeros(100),  # constant zero
+            "strategy_b": np.random.default_rng(42).normal(0, 0.01, 100),
+        }
+        matrix = compute_correlation_matrix(returns)
+        assert not np.any(np.isnan(matrix))
+        # Constant vs anything should give 0 correlation
+        assert matrix[0][1] == 0.0
+        assert matrix[1][0] == 0.0
+
+    def test_diagonal_always_one(self) -> None:
+        """Diagonal should be 1.0 even for constant returns."""
+        returns = {
+            "strategy_a": np.zeros(100),
+            "strategy_b": np.zeros(100),
+        }
+        matrix = compute_correlation_matrix(returns)
+        assert matrix[0][0] == 1.0
+        assert matrix[1][1] == 1.0

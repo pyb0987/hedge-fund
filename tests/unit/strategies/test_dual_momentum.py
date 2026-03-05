@@ -1,6 +1,6 @@
 """Tests for dual momentum strategy."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -8,7 +8,7 @@ import pytest
 
 from hedgefund.config.schemas import DualMomentumConfig
 from hedgefund.core.enums import SignalDirection
-from hedgefund.strategies.dual_momentum import DualMomentumStrategy, OFFENSIVE_ASSETS, DEFENSIVE_ASSET
+from hedgefund.strategies.dual_momentum import DualMomentumStrategy
 
 
 @pytest.fixture
@@ -112,3 +112,100 @@ class TestDualMomentumStrategy:
 
         # Each row should sum to <= 1
         assert (post_lookback.sum(axis=1) <= 1.0 + 1e-9).all()
+
+    def test_custom_assets_from_config(self) -> None:
+        """Verify strategy reads assets from config, not hardcoded constants."""
+        config = DualMomentumConfig(
+            lookback_days=20,
+            offensive_assets=["KRW-ETH", "QQQ"],
+            defensive_asset="GLD",
+        )
+        strategy = DualMomentumStrategy(config=config)
+        universe = strategy.get_universe()
+        assert "KRW-ETH" in universe
+        assert "QQQ" in universe
+        assert "GLD" in universe
+        assert "KRW-BTC" not in universe
+
+    def test_custom_assets_signal_generation(self) -> None:
+        """Custom assets should produce correct signals."""
+        config = DualMomentumConfig(
+            lookback_days=20,
+            offensive_assets=["KRW-ETH", "QQQ"],
+            defensive_asset="GLD",
+        )
+        strategy = DualMomentumStrategy(config=config)
+
+        rng = np.random.default_rng(42)
+        dates = pd.bdate_range("2024-01-01", periods=30)
+        data = {}
+        for sym, start, trend in [
+            ("KRW-ETH", 3_000_000, 0.02),
+            ("QQQ", 400, 0.005),
+            ("GLD", 180, 0.001),
+        ]:
+            close = start * np.cumprod(1 + np.full(30, trend))
+            data[sym] = pd.DataFrame({
+                "open": close * 0.999, "high": close * 1.005,
+                "low": close * 0.995, "close": close,
+                "volume": rng.uniform(1e6, 1e8, 30),
+            }, index=dates)
+
+        signals = strategy.generate_signals(data, datetime(2024, 2, 10))
+        assert len(signals) == 3
+        eth_sig = next(s for s in signals if s.symbol == "KRW-ETH")
+        assert eth_sig.direction == SignalDirection.LONG
+
+    def test_rebalance_gate_first_call(self, strategy: DualMomentumStrategy) -> None:
+        """First call always generates signals."""
+        data = _make_data(btc_trend=0.02, spy_trend=0.005, tlt_trend=0.001)
+        assert strategy.last_rebalance_date is None
+        signals = strategy.generate_signals(data, datetime(2024, 2, 1))
+        assert len(signals) == 3
+        assert strategy.last_rebalance_date == datetime(2024, 2, 1)
+
+    def test_rebalance_gate_blocks_same_month(self, strategy: DualMomentumStrategy) -> None:
+        """Same month → no rebalance."""
+        data = _make_data(btc_trend=0.02, spy_trend=0.005, tlt_trend=0.001)
+        strategy.generate_signals(data, datetime(2024, 2, 1))
+
+        # Same month, later day
+        signals = strategy.generate_signals(data, datetime(2024, 2, 15))
+        assert len(signals) == 0
+
+    def test_rebalance_gate_allows_new_month(self, strategy: DualMomentumStrategy) -> None:
+        """New month on/after rebalance_day → rebalance."""
+        data = _make_data(btc_trend=0.02, spy_trend=0.005, tlt_trend=0.001)
+        strategy.generate_signals(data, datetime(2024, 2, 1))
+
+        # Next month, rebalance_day=1
+        signals = strategy.generate_signals(data, datetime(2024, 3, 1))
+        assert len(signals) == 3
+        assert strategy.last_rebalance_date == datetime(2024, 3, 1)
+
+    def test_rebalance_gate_waits_for_rebalance_day(self) -> None:
+        """New month but before rebalance_day → no rebalance."""
+        config = DualMomentumConfig(lookback_days=20, rebalance_day=15)
+        strategy = DualMomentumStrategy(config=config)
+        data = _make_data(btc_trend=0.02, spy_trend=0.005, tlt_trend=0.001)
+
+        strategy.generate_signals(data, datetime(2024, 2, 15))
+
+        # March 5 — new month but before rebalance_day=15
+        signals = strategy.generate_signals(data, datetime(2024, 3, 5))
+        assert len(signals) == 0
+
+        # March 15 — at rebalance_day
+        signals = strategy.generate_signals(data, datetime(2024, 3, 15))
+        assert len(signals) == 3
+
+    def test_rebalance_gate_state_setter(self) -> None:
+        """last_rebalance_date setter works for state restoration."""
+        config = DualMomentumConfig(lookback_days=20, rebalance_day=1)
+        strategy = DualMomentumStrategy(config=config)
+
+        restored_date = datetime(2024, 2, 1)
+        strategy.last_rebalance_date = restored_date
+        assert strategy.last_rebalance_date == restored_date
+        assert not strategy.should_rebalance(datetime(2024, 2, 15))
+        assert strategy.should_rebalance(datetime(2024, 3, 1))

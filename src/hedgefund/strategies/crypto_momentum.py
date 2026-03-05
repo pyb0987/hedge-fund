@@ -22,6 +22,7 @@ class CryptoMomentumStrategy(BaseStrategy):
     def __init__(self, config: CryptoMomentumConfig, universe: list[str] | None = None) -> None:
         self._config = config
         self._universe = universe or []
+        self._last_rebalance_date: datetime | None = None
 
     @property
     def name(self) -> str:
@@ -39,8 +40,31 @@ class CryptoMomentumStrategy(BaseStrategy):
         return list(self._universe)
 
     def set_universe(self, symbols: list[str]) -> None:
-        """Update the tradeable universe (e.g., from top volume filter)."""
-        self._universe = list(symbols)
+        """Update the tradeable universe (e.g., from top volume filter).
+
+        Clamps to config.universe_size to prevent over-diversification.
+        Caller is responsible for pre-filtering by min_volume_krw.
+        """
+        max_size = self._config.universe_size
+        self._universe = list(symbols[:max_size])
+
+    @property
+    def last_rebalance_date(self) -> datetime | None:
+        return self._last_rebalance_date
+
+    @last_rebalance_date.setter
+    def last_rebalance_date(self, value: datetime | None) -> None:
+        self._last_rebalance_date = value
+
+    def should_rebalance(self, timestamp: datetime) -> bool:
+        """Check if enough days have elapsed since last rebalance.
+
+        Matches backtest_weights() logic: rebalance every holding_days.
+        """
+        if self._last_rebalance_date is None:
+            return True
+        days_elapsed = (timestamp - self._last_rebalance_date).days
+        return days_elapsed >= self._config.holding_days
 
     def generate_signals(
         self,
@@ -49,9 +73,12 @@ class CryptoMomentumStrategy(BaseStrategy):
     ) -> list[Signal]:
         """Generate momentum signals.
 
-        1. Compute lookback-day momentum for each symbol
-        2. Rank by momentum (descending)
-        3. Top N → LONG signal, rest → FLAT
+        1. Check rebalancing gate (holding_days interval)
+        2. Compute lookback-day momentum for each symbol
+        3. Rank by momentum (descending)
+        4. Top N → LONG signal, rest → FLAT
+
+        Returns empty list between rebalance dates (= hold current positions).
 
         Args:
             data: symbol → OHLCV DataFrame (must have 'close' column)
@@ -60,6 +87,9 @@ class CryptoMomentumStrategy(BaseStrategy):
         Returns:
             List of Signal objects
         """
+        if not self.should_rebalance(timestamp):
+            return []
+
         momentum_scores = self._compute_momentum_scores(data)
 
         if not momentum_scores:
@@ -95,17 +125,25 @@ class CryptoMomentumStrategy(BaseStrategy):
                     metadata={"momentum_score": score, "rank": float(i + 1)},
                 ))
 
+        # Mark rebalance date for holding_days gate
+        if signals:
+            self._last_rebalance_date = timestamp
+
         return signals
 
     def _compute_momentum_scores(
         self,
         data: dict[str, pd.DataFrame],
     ) -> list[tuple[str, float]]:
-        """Compute momentum score for each symbol."""
+        """Compute momentum score for each symbol in universe.
+
+        Only considers symbols within universe_size limit.
+        """
         scores: list[tuple[str, float]] = []
         lookback = self._config.lookback_days
+        max_size = self._config.universe_size
 
-        for symbol in self._universe:
+        for symbol in self._universe[:max_size]:
             df = data.get(symbol)
             if df is None or len(df) < lookback + 1:
                 continue
@@ -143,38 +181,58 @@ class CryptoMomentumStrategy(BaseStrategy):
     ) -> pd.DataFrame:
         """Generate weight matrix for vectorized backtesting.
 
-        Returns DataFrame with symbols as columns, dates as index,
-        and weights (0.0 or equal-weight among top_n) as values.
+        Rebalances every holding_days (default 7 = weekly).
+        Between rebalance dates, previous weights are carried forward
+        to minimize turnover and transaction costs.
         """
         symbols = list(data.keys())
         weights = pd.DataFrame(0.0, index=dates, columns=symbols)
 
         lookback = self._config.lookback_days
         top_n = self._config.top_n
+        holding_days = self._config.holding_days
+
+        days_since_rebalance = 0
+        current_weights: dict[str, float] = {}
 
         for i, date in enumerate(dates):
             if i < lookback:
                 continue
 
-            # Compute momentum for each symbol at this date
-            scores: list[tuple[str, float]] = []
-            for sym in symbols:
-                df = data[sym]
-                # Get data up to this date
-                mask = df.index <= date
-                available = df.loc[mask]
-                if len(available) < lookback + 1:
-                    continue
-                momentum = self.compute_momentum(available["close"], lookback)
-                scores.append((sym, momentum))
+            # Rebalance on first valid day, then every holding_days
+            is_rebalance = (
+                not current_weights  # first time
+                or days_since_rebalance >= holding_days
+            )
 
-            # Rank and assign weights
-            ranked = sorted(scores, key=lambda x: x[1], reverse=True)
-            selected = [(s, m) for s, m in ranked[:top_n] if m > 0]
+            if is_rebalance:
+                # Compute momentum for each symbol at this date
+                scores: list[tuple[str, float]] = []
+                for sym in symbols:
+                    df = data[sym]
+                    mask = df.index <= date
+                    available = df.loc[mask]
+                    if len(available) < lookback + 1:
+                        continue
+                    momentum = self.compute_momentum(available["close"], lookback)
+                    scores.append((sym, momentum))
 
-            if selected:
-                weight_per_asset = 1.0 / len(selected)
-                for sym, _ in selected:
-                    weights.loc[date, sym] = weight_per_asset
+                # Rank and assign weights
+                ranked = sorted(scores, key=lambda x: x[1], reverse=True)
+                selected = [(s, m) for s, m in ranked[:top_n] if m > 0]
+
+                current_weights = {}
+                if selected:
+                    weight_per_asset = 1.0 / len(selected)
+                    for sym, _ in selected:
+                        current_weights[sym] = weight_per_asset
+
+                days_since_rebalance = 0
+
+            # Apply current weights (carry forward between rebalances)
+            for sym, w in current_weights.items():
+                weights.loc[date, sym] = w
+
+            days_since_rebalance += 1
 
         return weights

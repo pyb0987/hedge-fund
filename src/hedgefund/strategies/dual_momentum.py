@@ -18,16 +18,15 @@ from hedgefund.core.enums import Exchange, SignalDirection
 from hedgefund.core.models import Signal
 from hedgefund.strategies.base import BaseStrategy
 
-# Asset definitions
-OFFENSIVE_ASSETS = ["KRW-BTC", "SPY"]
-DEFENSIVE_ASSET = "TLT"
-
 
 class DualMomentumStrategy(BaseStrategy):
     """Cross-asset dual momentum: absolute + relative momentum switching."""
 
     def __init__(self, config: DualMomentumConfig) -> None:
         self._config = config
+        self._offensive_assets = list(config.offensive_assets)
+        self._defensive_asset = config.defensive_asset
+        self._last_rebalance_date: datetime | None = None
 
     @property
     def name(self) -> str:
@@ -43,7 +42,31 @@ class DualMomentumStrategy(BaseStrategy):
         return self._config
 
     def get_universe(self) -> list[str]:
-        return OFFENSIVE_ASSETS + [DEFENSIVE_ASSET]
+        return self._offensive_assets + [self._defensive_asset]
+
+    @property
+    def last_rebalance_date(self) -> datetime | None:
+        return self._last_rebalance_date
+
+    @last_rebalance_date.setter
+    def last_rebalance_date(self, value: datetime | None) -> None:
+        self._last_rebalance_date = value
+
+    def should_rebalance(self, timestamp: datetime) -> bool:
+        """Check if it's time for monthly rebalancing.
+
+        Matches backtest_weights() logic: rebalance on rebalance_day of each month.
+        """
+        if self._last_rebalance_date is None:
+            return True
+
+        # Same month → no rebalance
+        if (timestamp.year == self._last_rebalance_date.year
+                and timestamp.month == self._last_rebalance_date.month):
+            return False
+
+        # New month — rebalance on or after rebalance_day
+        return timestamp.day >= self._config.rebalance_day
 
     def generate_signals(
         self,
@@ -52,23 +75,29 @@ class DualMomentumStrategy(BaseStrategy):
     ) -> list[Signal]:
         """Generate dual momentum signals.
 
+        Monthly rebalancing gate: returns empty list between rebalance dates.
+
         Decision tree:
-        1. Compute absolute momentum for each offensive asset
-        2. If both positive → invest in the higher one (relative momentum winner)
-        3. If only one positive → invest in that one
-        4. If both negative → defensive (TLT)
+        1. Check rebalancing gate (monthly on rebalance_day)
+        2. Compute absolute momentum for each offensive asset
+        3. If both positive → invest in the higher one (relative momentum winner)
+        4. If only one positive → invest in that one
+        5. If both negative → defensive (TLT)
         """
+        if not self.should_rebalance(timestamp):
+            return []
+
         lookback = self._config.lookback_days
         momenta: dict[str, float] = {}
 
-        for symbol in OFFENSIVE_ASSETS:
+        for symbol in self._offensive_assets:
             df = data.get(symbol)
             if df is None or len(df) < lookback + 1:
                 return []  # insufficient data — no signal
             momenta[symbol] = self.compute_momentum(df["close"], lookback)
 
         # Check if defensive asset data exists
-        if DEFENSIVE_ASSET not in data or len(data[DEFENSIVE_ASSET]) < lookback + 1:
+        if self._defensive_asset not in data or len(data[self._defensive_asset]) < lookback + 1:
             return []
 
         signals: list[Signal] = []
@@ -77,7 +106,7 @@ class DualMomentumStrategy(BaseStrategy):
         if len(positive_assets) >= 2:
             # Both positive → relative momentum winner gets 100%
             winner = max(positive_assets, key=positive_assets.get)  # type: ignore[arg-type]
-            for symbol in OFFENSIVE_ASSETS:
+            for symbol in self._offensive_assets:
                 direction = SignalDirection.LONG if symbol == winner else SignalDirection.FLAT
                 strength = 1.0 if symbol == winner else 0.0
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
@@ -92,7 +121,7 @@ class DualMomentumStrategy(BaseStrategy):
                 ))
             signals.append(Signal(
                 strategy_name=self.name,
-                symbol=DEFENSIVE_ASSET,
+                symbol=self._defensive_asset,
                 exchange=Exchange.ALPACA,
                 direction=SignalDirection.FLAT,
                 strength=0.0,
@@ -103,7 +132,7 @@ class DualMomentumStrategy(BaseStrategy):
         elif len(positive_assets) == 1:
             # Only one positive → invest in that one
             winner = list(positive_assets.keys())[0]
-            for symbol in OFFENSIVE_ASSETS:
+            for symbol in self._offensive_assets:
                 direction = SignalDirection.LONG if symbol == winner else SignalDirection.FLAT
                 strength = 1.0 if symbol == winner else 0.0
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
@@ -118,7 +147,7 @@ class DualMomentumStrategy(BaseStrategy):
                 ))
             signals.append(Signal(
                 strategy_name=self.name,
-                symbol=DEFENSIVE_ASSET,
+                symbol=self._defensive_asset,
                 exchange=Exchange.ALPACA,
                 direction=SignalDirection.FLAT,
                 strength=0.0,
@@ -127,8 +156,8 @@ class DualMomentumStrategy(BaseStrategy):
             ))
 
         else:
-            # Both negative → defensive mode (TLT)
-            for symbol in OFFENSIVE_ASSETS:
+            # Both negative → defensive mode
+            for symbol in self._offensive_assets:
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
                 signals.append(Signal(
                     strategy_name=self.name,
@@ -141,13 +170,17 @@ class DualMomentumStrategy(BaseStrategy):
                 ))
             signals.append(Signal(
                 strategy_name=self.name,
-                symbol=DEFENSIVE_ASSET,
+                symbol=self._defensive_asset,
                 exchange=Exchange.ALPACA,
                 direction=SignalDirection.LONG,
                 strength=1.0,
                 timestamp=timestamp,
                 metadata={"regime": "defensive"},
             ))
+
+        # Mark rebalance date for monthly gate
+        if signals:
+            self._last_rebalance_date = timestamp
 
         return signals
 
@@ -161,7 +194,7 @@ class DualMomentumStrategy(BaseStrategy):
         Monthly rebalancing: compute decision once per month,
         hold until next rebalancing date.
         """
-        all_symbols = OFFENSIVE_ASSETS + [DEFENSIVE_ASSET]
+        all_symbols = self._offensive_assets + [self._defensive_asset]
         available_symbols = [s for s in all_symbols if s in data]
         weights = pd.DataFrame(0.0, index=dates, columns=available_symbols)
 
@@ -199,7 +232,7 @@ class DualMomentumStrategy(BaseStrategy):
         """Compute target allocation at a given date."""
         momenta: dict[str, float] = {}
 
-        for symbol in OFFENSIVE_ASSETS:
+        for symbol in self._offensive_assets:
             df = data.get(symbol)
             if df is None:
                 continue
@@ -209,7 +242,7 @@ class DualMomentumStrategy(BaseStrategy):
                 continue
             momenta[symbol] = self.compute_momentum(available["close"], lookback)
 
-        if len(momenta) < len(OFFENSIVE_ASSETS):
+        if len(momenta) < len(self._offensive_assets):
             return {}  # insufficient data
 
         positive = {s: m for s, m in momenta.items() if m > 0}
@@ -218,4 +251,4 @@ class DualMomentumStrategy(BaseStrategy):
             winner = max(positive, key=positive.get)  # type: ignore[arg-type]
             return {winner: 1.0}
         else:
-            return {DEFENSIVE_ASSET: 1.0}
+            return {self._defensive_asset: 1.0}

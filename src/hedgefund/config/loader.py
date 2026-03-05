@@ -79,6 +79,14 @@ def load_strategy_config(
         params = data.pop("parameters")
         data.update(params)
 
+    # Flatten nested 'assets' key for dual_momentum (offensive/defensive → config fields)
+    if "assets" in data:
+        assets = data.pop("assets")
+        if "offensive" in assets:
+            data["offensive_assets"] = [a["symbol"] for a in assets["offensive"]]
+        if "defensive" in assets:
+            data["defensive_asset"] = assets["defensive"][0]["symbol"]
+
     try:
         return config_cls(**data)
     except ValidationError as e:

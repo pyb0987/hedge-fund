@@ -169,6 +169,9 @@ class DualMomentumConfig(BaseModel):
     lookback_days: int = Field(default=60, ge=20, le=252)
     rebalance_day: int = Field(default=1, ge=1, le=28)
 
+    offensive_assets: list[str] = Field(default=["KRW-BTC", "SPY"])
+    defensive_asset: str = Field(default="TLT")
+
     costs: CostConfig = CostConfig(commission_rate=0.00125, slippage_rate=0.001)
     validation: ValidationConfig = ValidationConfig()
 

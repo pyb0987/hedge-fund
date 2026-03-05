@@ -85,3 +85,30 @@ class TestMinimumVariance:
         cov = np.array([[0.04]])
         w = minimum_variance(cov)
         assert w[0] == pytest.approx(1.0)
+
+
+class TestRiskParityStability:
+    def test_near_singular_covariance(self) -> None:
+        """Near-singular covariance should not produce NaN or exploding weights."""
+        # One asset with near-zero variance
+        cov = np.array([
+            [0.16, 0.01, 0.0001],
+            [0.01, 0.04, 0.0001],
+            [0.0001, 0.0001, 1e-10],  # near-zero variance
+        ])
+        w = risk_parity(cov)
+        assert np.all(np.isfinite(w))
+        assert w.sum() == pytest.approx(1.0, abs=0.01)
+        assert np.all(w >= 0)
+
+    def test_identical_assets(self) -> None:
+        """Perfectly correlated identical assets should get equal weight."""
+        cov = np.array([
+            [0.04, 0.04, 0.04],
+            [0.04, 0.04, 0.04],
+            [0.04, 0.04, 0.04],
+        ])
+        # Degenerate case — should fallback to equal weight
+        w = risk_parity(cov)
+        assert np.all(np.isfinite(w))
+        assert w.sum() == pytest.approx(1.0, abs=0.01)

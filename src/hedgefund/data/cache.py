@@ -29,7 +29,7 @@ class TTLCache:
         entry = self._store.get(key)
         if entry is None:
             return None
-        if datetime.now() > entry.expires_at:
+        if datetime.now() >= entry.expires_at:
             del self._store[key]
             return None
         return entry.data
@@ -51,7 +51,7 @@ class TTLCache:
     def cleanup_expired(self) -> int:
         """Remove all expired entries. Returns count of removed entries."""
         now = datetime.now()
-        expired_keys = [k for k, v in self._store.items() if now > v.expires_at]
+        expired_keys = [k for k, v in self._store.items() if now >= v.expires_at]
         for key in expired_keys:
             del self._store[key]
         return len(expired_keys)

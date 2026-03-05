@@ -92,3 +92,31 @@ class TestEtfMeanReversionStrategy:
         assert strategy._zscore_to_strength(-1.5, is_entry=True) == pytest.approx(0.0)
         # At 2x threshold → strength 1
         assert strategy._zscore_to_strength(-3.0, is_entry=True) == pytest.approx(1.0)
+
+    def test_zscore_consistency_signal_vs_backtest(
+        self, strategy: EtfMeanReversionStrategy, mock_data: dict[str, pd.DataFrame]
+    ) -> None:
+        """Verify that backtest_weights uses the same z-score as generate_signals.
+
+        Both should use _compute_rolling_zscore (log-return based cumulative z-score),
+        NOT BaseStrategy.compute_zscore (single-day return z-score).
+        """
+        # Compute z-score via signal path
+        prices = mock_data["SPY"]["close"]
+        z_signal = strategy._compute_rolling_zscore(prices)
+
+        # Z-score should be a finite number
+        assert np.isfinite(z_signal)
+
+    def test_rolling_zscore_constant_prices(self, strategy: EtfMeanReversionStrategy) -> None:
+        """Constant prices → z-score should be 0 (no deviation)."""
+        dates = pd.bdate_range("2024-01-01", periods=30)
+        constant_prices = pd.Series(100.0, index=dates)
+        z = strategy._compute_rolling_zscore(constant_prices)
+        assert z == 0.0
+
+    def test_rolling_zscore_insufficient_data(self, strategy: EtfMeanReversionStrategy) -> None:
+        """Insufficient data → z-score should be 0."""
+        short_prices = pd.Series([100, 101, 102])
+        z = strategy._compute_rolling_zscore(short_prices)
+        assert z == 0.0

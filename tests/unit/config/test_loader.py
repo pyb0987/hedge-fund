@@ -9,7 +9,7 @@ from hedgefund.config.loader import (
     load_global_settings,
     load_strategy_config,
 )
-from hedgefund.config.schemas import CryptoMomentumConfig, GlobalSettings
+from hedgefund.config.schemas import CryptoMomentumConfig, DualMomentumConfig, GlobalSettings
 from hedgefund.core.exceptions import ConfigError, ConfigFileNotFoundError
 
 CONFIG_DIR = Path(__file__).parents[3] / "config"
@@ -41,6 +41,21 @@ class TestLoadStrategyConfig:
     def test_unknown_strategy(self) -> None:
         with pytest.raises(ConfigError, match="Unknown strategy"):
             load_strategy_config("nonexistent", CONFIG_DIR)
+
+
+class TestLoadDualMomentumAssets:
+    def test_loads_assets_from_yaml(self) -> None:
+        """Verify YAML assets section is correctly flattened into config fields."""
+        config = load_strategy_config("dual_momentum", CONFIG_DIR)
+        assert isinstance(config, DualMomentumConfig)
+        assert config.offensive_assets == ["KRW-BTC", "SPY"]
+        assert config.defensive_asset == "TLT"
+
+    def test_lookback_and_rebalance(self) -> None:
+        config = load_strategy_config("dual_momentum", CONFIG_DIR)
+        assert isinstance(config, DualMomentumConfig)
+        assert config.lookback_days == 60
+        assert config.rebalance_day == 1
 
 
 class TestLoadAllStrategyConfigs:

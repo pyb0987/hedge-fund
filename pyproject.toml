@@ -70,4 +70,9 @@ show_missing = true
 omit = [
     "src/hedgefund/data/providers/*",  # external API — integration tests
     "src/hedgefund/data/protocols.py",  # protocol definition only
+    "src/hedgefund/execution/executors/upbit_executor.py",  # exchange API — integration tests
+    "src/hedgefund/execution/executors/alpaca_executor.py",  # exchange API — integration tests
+    "src/hedgefund/app.py",  # app wiring — integration test scope
+    "src/hedgefund/cli.py",  # CLI entrypoint — manual testing
+    "src/hedgefund/__main__.py",  # entrypoint shim
 ]

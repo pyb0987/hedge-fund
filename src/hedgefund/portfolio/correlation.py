@@ -35,13 +35,18 @@ def compute_correlation_matrix(
 
     for i in range(n):
         for j in range(n):
+            if i == j:
+                matrix[i][j] = 1.0
+                continue
             r_i = strategy_returns[names[i]]
             r_j = strategy_returns[names[j]]
             min_len = min(len(r_i), len(r_j))
             if min_len < 10:
                 matrix[i][j] = 0.0
             else:
-                matrix[i][j] = float(np.corrcoef(r_i[:min_len], r_j[:min_len])[0, 1])
+                corr = float(np.corrcoef(r_i[:min_len], r_j[:min_len])[0, 1])
+                # Handle NaN (e.g., constant returns where std=0)
+                matrix[i][j] = 0.0 if np.isnan(corr) else corr
 
     return matrix
 

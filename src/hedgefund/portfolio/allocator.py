@@ -68,6 +68,8 @@ def risk_parity(
         # Avoid division by zero
         risk_contrib_safe = np.where(risk_contrib > 0, risk_contrib, 1e-10)
         adjustment = target_risk / risk_contrib_safe
+        # Clip adjustment to prevent numerical explosion when risk_contrib ≈ 0
+        adjustment = np.clip(adjustment, 0.01, 100.0)
         new_weights = weights * adjustment
         new_weights = np.maximum(new_weights, 0.0)  # no negative weights
         total = new_weights.sum()
