@@ -116,16 +116,20 @@ class EtfMeanReversionStrategy(BaseStrategy):
     def _compute_rolling_zscore(self, prices: pd.Series) -> float:
         """Compute z-score of cumulative log-return over lookback window.
 
-        Uses log returns for mathematical consistency:
-        sum(log_returns) is the exact log of the price ratio,
-        and CLT gives us mean/std scaling for the sum.
+        Two modes:
+        1. No drift correction (default): z = Σr / (σ × √N)
+           Tests cumulative return against null hypothesis μ=0.
+
+        2. Drift correction: z = (Σr - μ_long × N) / (σ × √N)
+           Estimates drift from a longer window (lookback × multiplier),
+           then tests whether recent cumulative return deviates from that trend.
+           Reduces systematic bias in trending markets.
         """
         lookback = self._config.lookback_days
 
         if len(prices) < lookback + 1:
             return 0.0
 
-        # Log returns: ln(P_t / P_{t-1})
         log_returns = np.log(prices / prices.shift(1)).dropna()
 
         if len(log_returns) < lookback:
@@ -133,13 +137,23 @@ class EtfMeanReversionStrategy(BaseStrategy):
 
         window = log_returns.iloc[-lookback:]
         cumulative_log_return = float(window.sum())
-
-        mean = float(window.mean()) * lookback
-        std = float(window.std()) * np.sqrt(lookback)
+        std = float(window.std(ddof=1))
 
         if std == 0:
             return 0.0
-        return (cumulative_log_return - mean) / std
+
+        if self._config.drift_correction:
+            drift_window_size = lookback * self._config.drift_lookback_multiplier
+            if len(log_returns) >= drift_window_size:
+                drift_window = log_returns.iloc[-drift_window_size:]
+                drift_mean = float(drift_window.mean())
+            else:
+                # Fallback: use all available data for drift estimation
+                drift_mean = float(log_returns.mean())
+            expected_return = drift_mean * lookback
+            return (cumulative_log_return - expected_return) / (std * np.sqrt(lookback))
+
+        return cumulative_log_return / (std * np.sqrt(lookback))
 
     def _zscore_to_strength(self, z: float, is_entry: bool) -> float:
         """Convert z-score magnitude to signal strength (0-1).

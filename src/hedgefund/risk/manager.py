@@ -21,6 +21,7 @@ from hedgefund.risk.limits import (
     check_single_position_limit,
     check_stop_loss,
     check_strategy_allocation_limit,
+    check_symbol_aggregate_exposure,
 )
 
 
@@ -58,6 +59,8 @@ class RiskManager:
         portfolio_value: float,
         portfolio_returns: NDArray[np.float64],
         timestamp: datetime,
+        symbol: str = "",
+        symbol_total_value: float = 0.0,
     ) -> RiskCheckReport:
         """Pre-trade risk check — must pass before order submission.
 
@@ -81,7 +84,13 @@ class RiskManager:
             new_strategy_value, portfolio_value, self._config,
         ))
 
-        # 3. Daily VaR
+        # 3. Cross-strategy symbol aggregate exposure
+        if symbol and symbol_total_value > 0:
+            checks.append(check_symbol_aggregate_exposure(
+                symbol, symbol_total_value + order_value, portfolio_value, self._config,
+            ))
+
+        # 4. Daily VaR
         if len(portfolio_returns) >= 20:
             var_95 = value_at_risk(portfolio_returns, 0.95)
             checks.append(check_daily_var_limit(var_95, self._config))

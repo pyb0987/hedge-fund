@@ -238,6 +238,7 @@ class PortfolioManager:
             "crypto_momentum": self._allocation.crypto_momentum,
             "etf_mean_reversion": self._allocation.etf_mean_reversion,
             "dual_momentum": self._allocation.dual_momentum,
+            "treasury_park": self._allocation.treasury_park,
         }
 
     def _get_total_portfolio_value(self) -> float:

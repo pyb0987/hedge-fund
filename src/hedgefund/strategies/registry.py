@@ -6,18 +6,24 @@ from hedgefund.config.schemas import (
     CryptoMomentumConfig,
     DualMomentumConfig,
     EtfMeanReversionConfig,
+    MarketHedgeConfig,
+    TreasuryParkConfig,
 )
 from hedgefund.core.exceptions import StrategyNotFoundError
 from hedgefund.strategies.base import Strategy
 from hedgefund.strategies.crypto_momentum import CryptoMomentumStrategy
 from hedgefund.strategies.dual_momentum import DualMomentumStrategy
 from hedgefund.strategies.etf_mean_reversion import EtfMeanReversionStrategy
+from hedgefund.strategies.market_hedge import MarketHedgeStrategy
+from hedgefund.strategies.treasury_park import TreasuryParkStrategy
 
 # Registry mapping: strategy name → (strategy class, config class)
 _REGISTRY: dict[str, tuple[type, type]] = {
     "crypto_momentum": (CryptoMomentumStrategy, CryptoMomentumConfig),
     "etf_mean_reversion": (EtfMeanReversionStrategy, EtfMeanReversionConfig),
     "dual_momentum": (DualMomentumStrategy, DualMomentumConfig),
+    "market_hedge": (MarketHedgeStrategy, MarketHedgeConfig),
+    "treasury_park": (TreasuryParkStrategy, TreasuryParkConfig),
 }
 
 

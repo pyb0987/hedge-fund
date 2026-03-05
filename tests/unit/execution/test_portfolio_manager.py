@@ -79,9 +79,10 @@ def risk_manager() -> RiskManager:
 @pytest.fixture
 def allocation() -> AllocationConfig:
     return AllocationConfig(
-        crypto_momentum=0.35,
-        etf_mean_reversion=0.35,
-        dual_momentum=0.30,
+        crypto_momentum=0.25,
+        etf_mean_reversion=0.25,
+        dual_momentum=0.20,
+        treasury_park=0.20,
     )
 
 

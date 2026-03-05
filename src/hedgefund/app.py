@@ -70,9 +70,14 @@ def _create_paper_executors(
     allocation = settings.allocation
     capital = settings.portfolio.initial_capital
 
-    # Split capital by exchange: crypto → UPBIT, ETF → ALPACA
+    # Split capital by exchange: crypto → UPBIT, ETF + hedge + treasury → ALPACA
     upbit_share = allocation.crypto_momentum + allocation.dual_momentum * 0.5
-    alpaca_share = allocation.etf_mean_reversion + allocation.dual_momentum * 0.5
+    alpaca_share = (
+        allocation.etf_mean_reversion
+        + allocation.dual_momentum * 0.5
+        + allocation.market_hedge
+        + allocation.treasury_park
+    )
 
     upbit_capital = capital * upbit_share
     alpaca_capital = capital * alpaca_share

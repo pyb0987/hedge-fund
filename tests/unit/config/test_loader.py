@@ -19,8 +19,9 @@ class TestLoadGlobalSettings:
     def test_load_valid(self) -> None:
         settings = load_global_settings(CONFIG_DIR)
         assert isinstance(settings, GlobalSettings)
-        assert settings.portfolio.initial_capital == 1_000_000
+        assert settings.portfolio.initial_capital == 13_000_000
         assert settings.risk.max_portfolio_drawdown == 0.20
+        assert settings.risk.max_symbol_exposure == 0.20
 
     def test_file_not_found(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigFileNotFoundError):
@@ -49,7 +50,8 @@ class TestLoadDualMomentumAssets:
         config = load_strategy_config("dual_momentum", CONFIG_DIR)
         assert isinstance(config, DualMomentumConfig)
         assert config.offensive_assets == ["KRW-BTC", "SPY"]
-        assert config.defensive_asset == "TLT"
+        assert config.defensive_assets == ["TLT", "GLD", "BIL"]
+        assert config.defensive_weights == [0.4, 0.3, 0.3]
 
     def test_lookback_and_rebalance(self) -> None:
         config = load_strategy_config("dual_momentum", CONFIG_DIR)
@@ -64,3 +66,4 @@ class TestLoadAllStrategyConfigs:
         assert "crypto_momentum" in configs
         assert "etf_mean_reversion" in configs
         assert "dual_momentum" in configs
+        assert "market_hedge" in configs

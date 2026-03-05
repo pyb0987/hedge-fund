@@ -26,14 +26,22 @@ class TestRiskConfig:
 
 
 class TestAllocationConfig:
-    def test_defaults_sum_to_one(self) -> None:
+    def test_defaults_sum_at_most_one(self) -> None:
         config = AllocationConfig()
-        total = config.crypto_momentum + config.etf_mean_reversion + config.dual_momentum
-        assert abs(total - 1.0) < 0.01
+        total = (
+            config.crypto_momentum + config.etf_mean_reversion
+            + config.dual_momentum + config.market_hedge
+            + config.treasury_park
+        )
+        assert total <= 1.01
 
-    def test_invalid_sum(self) -> None:
+    def test_invalid_sum_exceeds_one(self) -> None:
         with pytest.raises(ValidationError):
-            AllocationConfig(crypto_momentum=0.5, etf_mean_reversion=0.5, dual_momentum=0.5)
+            AllocationConfig(
+                crypto_momentum=0.4, etf_mean_reversion=0.4,
+                dual_momentum=0.3, market_hedge=0.0,
+                treasury_park=0.2,
+            )
 
 
 class TestCostConfig:

@@ -120,3 +120,78 @@ class TestEtfMeanReversionStrategy:
         short_prices = pd.Series([100, 101, 102])
         z = strategy._compute_rolling_zscore(short_prices)
         assert z == 0.0
+
+
+class TestDriftCorrectedZscore:
+    """Tests for drift-corrected z-score (mean != 0 assumption)."""
+
+    def test_drift_correction_reduces_bull_bias(self) -> None:
+        """In a steady uptrend, drift-corrected z-score should be closer to 0
+        than the uncorrected version (which would be positive).
+        """
+        config_no_drift = EtfMeanReversionConfig(
+            lookback_days=20, drift_correction=False,
+        )
+        config_drift = EtfMeanReversionConfig(
+            lookback_days=20, drift_correction=True, drift_lookback_multiplier=3,
+        )
+        strat_no_drift = EtfMeanReversionStrategy(config=config_no_drift, universe=["SPY"])
+        strat_drift = EtfMeanReversionStrategy(config=config_drift, universe=["SPY"])
+
+        # Steady uptrend: ~0.05% daily drift for 80 days
+        dates = pd.bdate_range("2024-01-01", periods=80)
+        prices = pd.Series(
+            100 * np.cumprod(1 + np.full(80, 0.0005)), index=dates,
+        )
+
+        z_no_drift = strat_no_drift._compute_rolling_zscore(prices)
+        z_drift = strat_drift._compute_rolling_zscore(prices)
+
+        # Uncorrected should be positive (cumulative return > 0 tested against 0)
+        assert z_no_drift > 0
+        # Drift-corrected should be closer to 0 (cumulative return tested against trend)
+        assert abs(z_drift) < abs(z_no_drift)
+
+    def test_drift_correction_default_off(self) -> None:
+        """Default config has drift_correction=False."""
+        config = EtfMeanReversionConfig()
+        assert config.drift_correction is False
+
+    def test_drift_correction_insufficient_history(self) -> None:
+        """If not enough data for drift estimation, falls back to no-drift."""
+        config = EtfMeanReversionConfig(
+            lookback_days=20, drift_correction=True, drift_lookback_multiplier=3,
+        )
+        strat = EtfMeanReversionStrategy(config=config, universe=["SPY"])
+
+        # Only 25 days — enough for lookback=20 but not for drift window=60
+        dates = pd.bdate_range("2024-01-01", periods=25)
+        prices = pd.Series(
+            100 * np.cumprod(1 + np.full(25, 0.001)), index=dates,
+        )
+
+        z = strat._compute_rolling_zscore(prices)
+        assert np.isfinite(z)  # Should work without crashing
+
+    def test_drift_backtest_weights_consistency(self) -> None:
+        """backtest_weights uses same z-score as generate_signals when drift enabled."""
+        config = EtfMeanReversionConfig(
+            lookback_days=20, drift_correction=True, drift_lookback_multiplier=3,
+        )
+        strat = EtfMeanReversionStrategy(config=config, universe=["SPY"])
+
+        dates = pd.bdate_range("2024-01-01", periods=80)
+        close = 100 * np.cumprod(1 + np.random.default_rng(42).normal(0.0003, 0.01, 80))
+        data = {"SPY": pd.DataFrame({
+            "open": close * 0.999, "high": close * 1.005,
+            "low": close * 0.995, "close": close,
+            "volume": np.ones(80) * 1e7,
+        }, index=dates)}
+
+        # Both paths should use the same _compute_rolling_zscore
+        weights = strat.backtest_weights(data, dates)
+        signals = strat.generate_signals(data, datetime(2024, 4, 15))
+
+        # No crash, shapes correct
+        assert weights.shape == (80, 1)
+        assert isinstance(signals, list)

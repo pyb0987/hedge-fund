@@ -1,5 +1,6 @@
 # Strategy C: Dual Momentum (Cross-Asset)
 # Gary Antonacci 기반 — BTC/KRW vs SPY 상대 모멘텀
+# 방어 모드: TLT+GLD+BIL 바스켓 (금리인상기 TLT 단독 방어 실패 대비)
 name: dual_momentum
 exchange: upbit+alpaca
 market: cross_asset
@@ -18,6 +19,13 @@ assets:
   defensive:
     - symbol: TLT
       exchange: alpaca
+      weight: 0.4
+    - symbol: GLD
+      exchange: alpaca
+      weight: 0.3
+    - symbol: BIL
+      exchange: alpaca
+      weight: 0.3
 
 # Transaction costs (blended)
 costs:

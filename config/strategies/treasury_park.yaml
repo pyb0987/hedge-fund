@@ -1,0 +1,12 @@
+# Treasury Park: Park idle cash in short-term T-bill ETF
+# Zero parameters, zero overfitting risk, provides risk-free yield
+name: treasury_park
+exchange: alpaca
+market: US
+
+parameters:
+  symbol: BIL  # SPDR Bloomberg 1-3 Month T-Bill ETF
+
+costs:
+  commission_rate: 0.0
+  slippage_rate: 0.0001  # BIL spread is extremely tight

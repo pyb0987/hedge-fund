@@ -5,9 +5,8 @@ Signal → 포지션 사이징 → 리스크 체크 → Order 생성.
 
 from datetime import datetime
 
-from hedgefund.core.enums import OrderSide, OrderStatus
+from hedgefund.core.enums import Exchange, OrderSide, OrderStatus, SignalDirection
 from hedgefund.core.models import Order, Signal
-from hedgefund.core.enums import SignalDirection
 from hedgefund.execution.cost_model import is_above_minimum
 
 
@@ -75,8 +74,35 @@ def signal_to_order(
         )
 
     elif signal.direction == SignalDirection.SHORT:
-        # Short selling — not supported for small capital (leverage = 1.0)
-        return None
+        # Short selling via Alpaca margin account ($2K+ required)
+        if signal.exchange != Exchange.ALPACA:
+            return None  # Upbit does not support short selling
+
+        target_qty = target_value / current_price
+        if current_position_qty >= 0:
+            # Open new short or add to no position
+            short_qty = target_qty
+        else:
+            # Already short — adjust
+            delta_qty = target_qty - abs(current_position_qty)
+            if delta_qty <= 0:
+                return None  # already at or beyond target short
+            short_qty = delta_qty
+
+        order_value = short_qty * current_price
+        if not is_above_minimum(order_value, signal.exchange):
+            return None
+
+        return Order(
+            strategy_name=signal.strategy_name,
+            symbol=signal.symbol,
+            exchange=signal.exchange,
+            side=OrderSide.SELL,
+            quantity=short_qty,
+            price=current_price,
+            status=OrderStatus.PENDING,
+            timestamp=signal.timestamp,
+        )
 
     return None
 

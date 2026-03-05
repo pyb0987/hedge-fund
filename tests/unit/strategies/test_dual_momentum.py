@@ -13,7 +13,10 @@ from hedgefund.strategies.dual_momentum import DualMomentumStrategy
 
 @pytest.fixture
 def strategy() -> DualMomentumStrategy:
-    config = DualMomentumConfig(lookback_days=20, rebalance_day=1)
+    config = DualMomentumConfig(
+        lookback_days=20, rebalance_day=1,
+        defensive_assets=["TLT"], defensive_weights=[1.0],
+    )
     return DualMomentumStrategy(config=config)
 
 
@@ -118,7 +121,7 @@ class TestDualMomentumStrategy:
         config = DualMomentumConfig(
             lookback_days=20,
             offensive_assets=["KRW-ETH", "QQQ"],
-            defensive_asset="GLD",
+            defensive_assets=["GLD"], defensive_weights=[1.0],
         )
         strategy = DualMomentumStrategy(config=config)
         universe = strategy.get_universe()
@@ -132,7 +135,7 @@ class TestDualMomentumStrategy:
         config = DualMomentumConfig(
             lookback_days=20,
             offensive_assets=["KRW-ETH", "QQQ"],
-            defensive_asset="GLD",
+            defensive_assets=["GLD"], defensive_weights=[1.0],
         )
         strategy = DualMomentumStrategy(config=config)
 
@@ -185,7 +188,10 @@ class TestDualMomentumStrategy:
 
     def test_rebalance_gate_waits_for_rebalance_day(self) -> None:
         """New month but before rebalance_day → no rebalance."""
-        config = DualMomentumConfig(lookback_days=20, rebalance_day=15)
+        config = DualMomentumConfig(
+            lookback_days=20, rebalance_day=15,
+            defensive_assets=["TLT"], defensive_weights=[1.0],
+        )
         strategy = DualMomentumStrategy(config=config)
         data = _make_data(btc_trend=0.02, spy_trend=0.005, tlt_trend=0.001)
 
@@ -201,7 +207,10 @@ class TestDualMomentumStrategy:
 
     def test_rebalance_gate_state_setter(self) -> None:
         """last_rebalance_date setter works for state restoration."""
-        config = DualMomentumConfig(lookback_days=20, rebalance_day=1)
+        config = DualMomentumConfig(
+            lookback_days=20, rebalance_day=1,
+            defensive_assets=["TLT"], defensive_weights=[1.0],
+        )
         strategy = DualMomentumStrategy(config=config)
 
         restored_date = datetime(2024, 2, 1)

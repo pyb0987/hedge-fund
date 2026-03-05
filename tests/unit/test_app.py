@@ -63,9 +63,10 @@ risk:
   per_trade_stop_loss: 0.03
   max_leverage: 1.0
 allocation:
-  crypto_momentum: 0.35
-  etf_mean_reversion: 0.35
-  dual_momentum: 0.30
+  crypto_momentum: 0.20
+  etf_mean_reversion: 0.20
+  dual_momentum: 0.15
+  treasury_park: 0.35
 """)
 
         (strategies_dir / "etf_mean_reversion.yaml").write_text("""
@@ -87,6 +88,17 @@ validation:
   min_sharpe: 0.8
   max_drawdown: 0.20
   min_profit_factor: 1.3
+""")
+
+        (strategies_dir / "treasury_park.yaml").write_text("""
+name: treasury_park
+exchange: alpaca
+market: US
+parameters:
+  symbol: BIL
+costs:
+  commission_rate: 0.0
+  slippage_rate: 0.0001
 """)
 
         # Mock providers to return fake data

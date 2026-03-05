@@ -67,7 +67,7 @@ class TestStopLoss:
         assert result.passed is True
 
     def test_stop_loss_hit(self, config: RiskConfig) -> None:
-        result = check_stop_loss(-0.04, config)
+        result = check_stop_loss(-0.06, config)
         assert result.passed is False
 
 

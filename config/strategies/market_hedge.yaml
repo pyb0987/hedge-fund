@@ -1,0 +1,29 @@
+# Strategy D: Market Hedge (Inverse ETF Overlay)
+# 시장 하락 시 인버스 ETF 매수로 포트폴리오 beta 감소
+# SPY 모멘텀 < 0 → SH 매수, QQQ 모멘텀 < 0 → PSQ 매수
+name: market_hedge
+exchange: alpaca
+market: US
+rebalance_frequency: weekly
+
+parameters:
+  lookback_days: 60          # 모멘텀 측정 기간
+  holding_days: 7            # 홀딩 기간 (주간 리밸런싱)
+
+# Index → Inverse ETF 매핑
+index_inverse_pairs:
+  - index: SPY
+    inverse: SH              # ProShares Short S&P500
+  - index: QQQ
+    inverse: PSQ             # ProShares Short QQQ
+
+# Transaction costs (Alpaca 무수수료)
+costs:
+  commission_rate: 0.0
+  slippage_rate: 0.001       # 인버스 ETF 스프레드 다소 넓음
+
+# Go/No-Go criteria
+validation:
+  min_sharpe: 0.5            # 헤지 전략은 Sharpe 기준 완화
+  max_drawdown: 0.15
+  min_profit_factor: 1.1

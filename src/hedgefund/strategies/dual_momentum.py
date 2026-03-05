@@ -25,7 +25,8 @@ class DualMomentumStrategy(BaseStrategy):
     def __init__(self, config: DualMomentumConfig) -> None:
         self._config = config
         self._offensive_assets = list(config.offensive_assets)
-        self._defensive_asset = config.defensive_asset
+        self._defensive_assets = list(config.defensive_assets)
+        self._defensive_weights = list(config.defensive_weights)
         self._last_rebalance_date: datetime | None = None
 
     @property
@@ -42,7 +43,7 @@ class DualMomentumStrategy(BaseStrategy):
         return self._config
 
     def get_universe(self) -> list[str]:
-        return self._offensive_assets + [self._defensive_asset]
+        return self._offensive_assets + list(self._defensive_assets)
 
     @property
     def last_rebalance_date(self) -> datetime | None:
@@ -96,8 +97,12 @@ class DualMomentumStrategy(BaseStrategy):
                 return []  # insufficient data — no signal
             momenta[symbol] = self.compute_momentum(df["close"], lookback)
 
-        # Check if defensive asset data exists
-        if self._defensive_asset not in data or len(data[self._defensive_asset]) < lookback + 1:
+        # Check if at least one defensive asset has data
+        defensive_with_data = [
+            s for s in self._defensive_assets
+            if s in data and len(data[s]) >= lookback + 1
+        ]
+        if not defensive_with_data:
             return []
 
         signals: list[Signal] = []
@@ -119,15 +124,16 @@ class DualMomentumStrategy(BaseStrategy):
                     timestamp=timestamp,
                     metadata={"momentum": momenta[symbol], "regime": "offensive", "lookback_days": float(self._config.lookback_days)},
                 ))
-            signals.append(Signal(
-                strategy_name=self.name,
-                symbol=self._defensive_asset,
-                exchange=Exchange.ALPACA,
-                direction=SignalDirection.FLAT,
-                strength=0.0,
-                timestamp=timestamp,
-                metadata={"regime": "offensive", "lookback_days": float(self._config.lookback_days)},
-            ))
+            for def_sym in self._defensive_assets:
+                signals.append(Signal(
+                    strategy_name=self.name,
+                    symbol=def_sym,
+                    exchange=Exchange.ALPACA,
+                    direction=SignalDirection.FLAT,
+                    strength=0.0,
+                    timestamp=timestamp,
+                    metadata={"regime": "offensive", "lookback_days": float(self._config.lookback_days)},
+                ))
 
         elif len(positive_assets) == 1:
             # Only one positive → invest in that one
@@ -145,18 +151,19 @@ class DualMomentumStrategy(BaseStrategy):
                     timestamp=timestamp,
                     metadata={"momentum": momenta[symbol], "regime": "mixed", "lookback_days": float(self._config.lookback_days)},
                 ))
-            signals.append(Signal(
-                strategy_name=self.name,
-                symbol=self._defensive_asset,
-                exchange=Exchange.ALPACA,
-                direction=SignalDirection.FLAT,
-                strength=0.0,
-                timestamp=timestamp,
-                metadata={"regime": "mixed", "lookback_days": float(self._config.lookback_days)},
-            ))
+            for def_sym in self._defensive_assets:
+                signals.append(Signal(
+                    strategy_name=self.name,
+                    symbol=def_sym,
+                    exchange=Exchange.ALPACA,
+                    direction=SignalDirection.FLAT,
+                    strength=0.0,
+                    timestamp=timestamp,
+                    metadata={"regime": "mixed", "lookback_days": float(self._config.lookback_days)},
+                ))
 
         else:
-            # Both negative → defensive mode
+            # Both negative → defensive basket mode
             for symbol in self._offensive_assets:
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
                 signals.append(Signal(
@@ -168,15 +175,16 @@ class DualMomentumStrategy(BaseStrategy):
                     timestamp=timestamp,
                     metadata={"momentum": momenta[symbol], "regime": "defensive", "lookback_days": float(self._config.lookback_days)},
                 ))
-            signals.append(Signal(
-                strategy_name=self.name,
-                symbol=self._defensive_asset,
-                exchange=Exchange.ALPACA,
-                direction=SignalDirection.LONG,
-                strength=1.0,
-                timestamp=timestamp,
-                metadata={"regime": "defensive", "lookback_days": float(self._config.lookback_days)},
-            ))
+            for def_sym, def_weight in zip(self._defensive_assets, self._defensive_weights):
+                signals.append(Signal(
+                    strategy_name=self.name,
+                    symbol=def_sym,
+                    exchange=Exchange.ALPACA,
+                    direction=SignalDirection.LONG,
+                    strength=def_weight,
+                    timestamp=timestamp,
+                    metadata={"regime": "defensive", "weight": def_weight, "lookback_days": float(self._config.lookback_days)},
+                ))
 
         # Mark rebalance date for monthly gate
         if signals:
@@ -194,7 +202,7 @@ class DualMomentumStrategy(BaseStrategy):
         Monthly rebalancing: compute decision once per month,
         hold until next rebalancing date.
         """
-        all_symbols = self._offensive_assets + [self._defensive_asset]
+        all_symbols = self._offensive_assets + list(self._defensive_assets)
         available_symbols = [s for s in all_symbols if s in data]
         weights = pd.DataFrame(0.0, index=dates, columns=available_symbols)
 
@@ -251,4 +259,8 @@ class DualMomentumStrategy(BaseStrategy):
             winner = max(positive, key=positive.get)  # type: ignore[arg-type]
             return {winner: 1.0}
         else:
-            return {self._defensive_asset: 1.0}
+            # Defensive basket allocation
+            return {
+                sym: w
+                for sym, w in zip(self._defensive_assets, self._defensive_weights)
+            }

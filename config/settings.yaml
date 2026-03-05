@@ -1,6 +1,6 @@
 # Global Portfolio Settings
 portfolio:
-  initial_capital: 1000000  # KRW (100만원)
+  initial_capital: 13000000  # KRW (~$10,000)
   base_currency: KRW
 
 # Risk Hard Limits
@@ -8,15 +8,19 @@ risk:
   max_portfolio_drawdown: 0.20       # 20% → 전 포지션 50% 감소
   max_single_position: 0.15          # 15% → 주문 거부
   max_strategy_allocation: 0.40      # 40% → 주문 거부
+  max_symbol_exposure: 0.20          # 20% → 교차 전략 심볼 합산 한도
   daily_var_95: 0.02                 # 2% → 경고 + 신규 주문 중단
-  per_trade_stop_loss: 0.03          # 3% → 기계적 청산
-  max_leverage: 1.0                  # 무레버리지
+  per_trade_stop_loss: 0.05          # 5% → 기계적 청산 (코인 변동성 고려 상향)
+  max_leverage: 1.0                  # 무레버리지 (인버스 ETF는 매수이므로 레버리지 아님)
 
-# Strategy Allocation
+# Strategy Allocation (합계 ≤ 1.0, 나머지는 현금 버퍼)
 allocation:
-  crypto_momentum: 0.35              # 35% (~350,000 KRW)
-  etf_mean_reversion: 0.35           # 35% (~350,000 KRW)
-  dual_momentum: 0.30                # 30% (~300,000 KRW)
+  crypto_momentum: 0.10              # 10% (~$1,000) — 비용 드래그 감소
+  etf_mean_reversion: 0.20           # 20% (~$2,000)
+  dual_momentum: 0.15                # 15% (~$1,500) — BTC 교차 노출 20% 한도 준수
+  market_hedge: 0.0                  # NO-GO: SPY+SH 충돌, 변동성 감쇠
+  treasury_park: 0.45                # 45% (~$4,500) → BIL 단기국채 ETF (무위험 수익)
+  # 나머지 10% (~$1,000) = 현금 버퍼 (긴급 리밸런싱 여유)
 
 # Scheduling
 schedule:
@@ -37,5 +41,5 @@ monitoring:
   health_check_interval_minutes: 30
   telegram:
     enabled: true
-    bot_token: "REDACTED_TOKEN"
-    chat_id: "REDACTED_CHAT_ID"
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}

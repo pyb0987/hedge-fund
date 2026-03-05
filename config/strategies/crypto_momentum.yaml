@@ -7,7 +7,7 @@ rebalance_frequency: weekly
 
 parameters:
   lookback_days: 20          # 모멘텀 측정 기간
-  holding_days: 7            # 홀딩 기간 (주간 리밸런싱)
+  holding_days: 14           # 홀딩 기간 (격주 리밸런싱, 비용 13.9%→7%/년 감소)
   top_n: 3                   # 상위 N개 코인 매수
   universe_size: 15          # 상위 N개 코인에서 선정
   min_volume_krw: 1000000000 # 최소 일일 거래량 10억 KRW (유동성 필터)

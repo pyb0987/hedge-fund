@@ -1,5 +1,7 @@
 """YAML configuration loader with Pydantic validation."""
 
+import os
+import re
 from pathlib import Path
 from typing import TypeVar
 
@@ -11,6 +13,8 @@ from hedgefund.config.schemas import (
     DualMomentumConfig,
     EtfMeanReversionConfig,
     GlobalSettings,
+    MarketHedgeConfig,
+    TreasuryParkConfig,
 )
 from hedgefund.core.exceptions import ConfigError, ConfigFileNotFoundError
 
@@ -21,6 +25,8 @@ STRATEGY_CONFIG_MAP: dict[str, type[BaseModel]] = {
     "crypto_momentum": CryptoMomentumConfig,
     "etf_mean_reversion": EtfMeanReversionConfig,
     "dual_momentum": DualMomentumConfig,
+    "market_hedge": MarketHedgeConfig,
+    "treasury_park": TreasuryParkConfig,
 }
 
 DEFAULT_CONFIG_DIR = Path("config")
@@ -38,7 +44,31 @@ def _load_yaml(path: Path) -> dict:
 
     if not isinstance(data, dict):
         raise ConfigError(f"Expected dict in {path}, got {type(data).__name__}")
+    _resolve_env_vars(data)
     return data
+
+
+def _resolve_env_vars(obj: object) -> None:
+    """Recursively resolve ${ENV_VAR} placeholders in config values."""
+    env_pattern = re.compile(r"^\$\{(\w+)\}$")
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, str):
+                match = env_pattern.match(value)
+                if match:
+                    env_name = match.group(1)
+                    obj[key] = os.environ.get(env_name, "")
+            elif isinstance(value, (dict, list)):
+                _resolve_env_vars(value)
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            if isinstance(item, str):
+                match = env_pattern.match(item)
+                if match:
+                    env_name = match.group(1)
+                    obj[i] = os.environ.get(env_name, "")
+            elif isinstance(item, (dict, list)):
+                _resolve_env_vars(item)
 
 
 def load_global_settings(config_dir: Path = DEFAULT_CONFIG_DIR) -> GlobalSettings:
@@ -85,7 +115,15 @@ def load_strategy_config(
         if "offensive" in assets:
             data["offensive_assets"] = [a["symbol"] for a in assets["offensive"]]
         if "defensive" in assets:
-            data["defensive_asset"] = assets["defensive"][0]["symbol"]
+            data["defensive_assets"] = [a["symbol"] for a in assets["defensive"]]
+            weights = [a.get("weight", 1.0 / len(assets["defensive"])) for a in assets["defensive"]]
+            data["defensive_weights"] = weights
+
+    # Flatten nested 'index_inverse_pairs' for market_hedge
+    if "index_inverse_pairs" in data:
+        pairs = data.pop("index_inverse_pairs")
+        data["index_assets"] = [p["index"] for p in pairs]
+        data["inverse_assets"] = [p["inverse"] for p in pairs]
 
     try:
         return config_cls(**data)

@@ -1,6 +1,6 @@
 """Pydantic schemas for configuration validation."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hedgefund.core.enums import RebalanceFrequency
 
@@ -20,13 +20,16 @@ class RiskConfig(BaseModel):
     max_strategy_allocation: float = Field(
         default=0.40, ge=0.10, le=1.0, description="Max allocation to any single strategy"
     )
+    max_symbol_exposure: float = Field(
+        default=0.20, ge=0.05, le=0.50, description="Max cross-strategy symbol aggregate exposure"
+    )
     daily_var_95: float = Field(
         default=0.02, ge=0.005, le=0.10, description="95% daily VaR limit"
     )
     per_trade_stop_loss: float = Field(
-        default=0.03, ge=0.01, le=0.10, description="Per-trade stop loss"
+        default=0.05, ge=0.01, le=0.20, description="Per-trade stop loss"
     )
-    max_leverage: float = Field(default=1.0, ge=1.0, le=1.0, description="Max leverage (1.0 = no)")
+    max_leverage: float = Field(default=1.0, ge=1.0, le=2.0, description="Max gross leverage")
 
 
 # --- Allocation ---
@@ -35,19 +38,25 @@ class RiskConfig(BaseModel):
 class AllocationConfig(BaseModel):
     """Strategy allocation configuration."""
 
-    crypto_momentum: float = Field(default=0.35, ge=0.0, le=1.0)
-    etf_mean_reversion: float = Field(default=0.35, ge=0.0, le=1.0)
-    dual_momentum: float = Field(default=0.30, ge=0.0, le=1.0)
+    crypto_momentum: float = Field(default=0.10, ge=0.0, le=1.0)
+    etf_mean_reversion: float = Field(default=0.20, ge=0.0, le=1.0)
+    dual_momentum: float = Field(default=0.15, ge=0.0, le=1.0)
+    market_hedge: float = Field(default=0.0, ge=0.0, le=1.0)
+    treasury_park: float = Field(default=0.45, ge=0.0, le=1.0)
 
-    @field_validator("dual_momentum")
-    @classmethod
-    def allocations_sum_to_one(cls, v: float, info: object) -> float:
-        data = info.data if hasattr(info, "data") else {}  # type: ignore[union-attr]
-        total = data.get("crypto_momentum", 0.35) + data.get("etf_mean_reversion", 0.35) + v
-        if abs(total - 1.0) > 0.01:
-            msg = f"Allocations must sum to 1.0, got {total:.3f}"
+    @model_validator(mode="after")
+    def allocations_sum_at_most_one(self) -> "AllocationConfig":
+        total = (
+            self.crypto_momentum
+            + self.etf_mean_reversion
+            + self.dual_momentum
+            + self.market_hedge
+            + self.treasury_park
+        )
+        if total > 1.01:
+            msg = f"Allocations must sum to ≤ 1.0, got {total:.3f}"
             raise ValueError(msg)
-        return v
+        return self
 
 
 # --- Schedule ---
@@ -160,6 +169,11 @@ class EtfMeanReversionConfig(BaseModel):
     z_entry_threshold: float = Field(default=-1.5, le=0)
     z_exit_threshold: float = Field(default=1.5, ge=0)
     holding_days: int = Field(default=7, ge=1, le=30)
+    drift_correction: bool = Field(default=False, description="Use drift-corrected z-score")
+    drift_lookback_multiplier: int = Field(
+        default=3, ge=2, le=10,
+        description="Multiplier for drift estimation window (drift_window = lookback * multiplier)",
+    )
 
     universe: list[str] = Field(default=["SPY", "QQQ", "TLT", "GLD", "IEF"])
 
@@ -179,9 +193,52 @@ class DualMomentumConfig(BaseModel):
     rebalance_day: int = Field(default=1, ge=1, le=28)
 
     offensive_assets: list[str] = Field(default=["KRW-BTC", "SPY"])
-    defensive_asset: str = Field(default="TLT")
+    defensive_assets: list[str] = Field(default=["TLT", "GLD", "BIL"])
+    defensive_weights: list[float] = Field(default=[0.4, 0.3, 0.3])
 
     costs: CostConfig = CostConfig(commission_rate=0.00125, slippage_rate=0.001)
+    validation: ValidationConfig = ValidationConfig()
+
+    @field_validator("defensive_weights")
+    @classmethod
+    def defensive_weights_sum_to_one(cls, v: list[float]) -> list[float]:
+        total = sum(v)
+        if abs(total - 1.0) > 0.01:
+            msg = f"Defensive weights must sum to 1.0, got {total:.3f}"
+            raise ValueError(msg)
+        return v
+
+
+class TreasuryParkConfig(BaseModel):
+    """Strategy: Treasury Park — park idle cash in T-bill ETF."""
+
+    name: str = "treasury_park"
+    exchange: str = "alpaca"
+    market: str = "US"
+    rebalance_frequency: RebalanceFrequency = RebalanceFrequency.WEEKLY
+
+    symbol: str = Field(default="BIL", description="Short-term treasury ETF symbol")
+
+    costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.0001)
+    validation: ValidationConfig = ValidationConfig()
+
+
+class MarketHedgeConfig(BaseModel):
+    """Strategy D: Market Hedge (Inverse ETF) parameters."""
+
+    name: str = "market_hedge"
+    exchange: str = "alpaca"
+    market: str = "US"
+    rebalance_frequency: RebalanceFrequency = RebalanceFrequency.WEEKLY
+
+    lookback_days: int = Field(default=60, ge=20, le=252)
+    holding_days: int = Field(default=7, ge=1, le=30)
+
+    # Index → Inverse ETF mapping
+    index_assets: list[str] = Field(default=["SPY", "QQQ"])
+    inverse_assets: list[str] = Field(default=["SH", "PSQ"])
+
+    costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.001)
     validation: ValidationConfig = ValidationConfig()
 
 

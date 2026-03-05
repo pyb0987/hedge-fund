@@ -122,6 +122,34 @@ def enforce_position_limit(
         raise PositionLimitError(result.message)
 
 
+def check_symbol_aggregate_exposure(
+    symbol: str,
+    symbol_total_value: float,
+    portfolio_value: float,
+    config: RiskConfig,
+) -> LimitCheckResult:
+    """Check if a symbol's cross-strategy aggregate exposure exceeds max.
+
+    Rule: No single symbol > 20% of portfolio across all strategies.
+    """
+    if portfolio_value <= 0:
+        return LimitCheckResult(
+            passed=False, rule_name="symbol_aggregate",
+            current_value=0.0, limit_value=config.max_symbol_exposure,
+            message="Portfolio value is zero or negative",
+        )
+
+    ratio = symbol_total_value / portfolio_value
+    passed = ratio <= config.max_symbol_exposure
+    return LimitCheckResult(
+        passed=passed,
+        rule_name="symbol_aggregate",
+        current_value=ratio,
+        limit_value=config.max_symbol_exposure,
+        message=f"Symbol {symbol} aggregate {ratio:.1%} {'<=' if passed else '>'} {config.max_symbol_exposure:.1%} limit",
+    )
+
+
 def enforce_strategy_limit(
     strategy_value: float,
     portfolio_value: float,
