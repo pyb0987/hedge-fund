@@ -399,6 +399,153 @@ def validate_wf(
 
 
 @app.command()
+def optimize(
+    strategy_name: str = typer.Argument(help="Strategy to optimize (e.g., etf_mean_reversion)"),
+    days: int = typer.Option(
+        1260, help="Historical data days to fetch (default: 1260 = ~5 years)",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable debug logging",
+    ),
+) -> None:
+    """Run parameter grid search for a strategy with Deflated Sharpe correction.
+
+    Example: uv run python -m hedgefund optimize etf_mean_reversion
+    """
+    _setup_logging(verbose)
+
+    from hedgefund.backtest.engine import BacktestConfig
+    from hedgefund.backtest.optimizer import run_grid_search
+    from hedgefund.config.loader import load_all_strategy_configs
+    from hedgefund.config.schemas import (
+        CryptoMomentumConfig,
+        DualMomentumConfig,
+        EtfMeanReversionConfig,
+    )
+    from hedgefund.strategies.crypto_momentum import CryptoMomentumStrategy
+    from hedgefund.strategies.dual_momentum import DualMomentumStrategy
+    from hedgefund.strategies.etf_mean_reversion import EtfMeanReversionStrategy
+
+    # Strategy-specific grids and factories
+    GRIDS: dict[str, dict] = {
+        "etf_mean_reversion": {
+            "factory": lambda p: EtfMeanReversionStrategy(EtfMeanReversionConfig(**p)),
+            "grid": {
+                "lookback_days": [10, 15, 20, 25, 30],
+                "z_entry_threshold": [-1.0, -1.5, -2.0, -2.5],
+                "z_exit_threshold": [1.0, 1.5, 2.0],
+            },
+            "symbols": ["SPY", "QQQ", "TLT", "GLD", "IEF"],
+            "cost_config": BacktestConfig(commission_rate=0.0, slippage_rate=0.0005),
+        },
+        "crypto_momentum": {
+            "factory": lambda p: CryptoMomentumStrategy(CryptoMomentumConfig(**p)),
+            "grid": {
+                "lookback_days": [10, 14, 20, 30],
+                "top_n": [2, 3, 5],
+                "holding_days": [7, 14, 21],
+            },
+            "symbols": ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA"],
+            "cost_config": BacktestConfig(commission_rate=0.0025, slippage_rate=0.0015),
+        },
+        "dual_momentum": {
+            "factory": lambda p: DualMomentumStrategy(DualMomentumConfig(**p)),
+            "grid": {
+                "lookback_days": [40, 60, 90, 120],
+            },
+            "symbols": ["KRW-BTC", "SPY", "TLT", "GLD", "BIL"],
+            "cost_config": BacktestConfig(commission_rate=0.00125, slippage_rate=0.001),
+        },
+    }
+
+    if strategy_name not in GRIDS:
+        typer.echo(f"Unknown strategy: {strategy_name}. Available: {list(GRIDS.keys())}")
+        raise typer.Exit(code=1)
+
+    spec = GRIDS[strategy_name]
+    grid_size = 1
+    for values in spec["grid"].values():
+        grid_size *= len(values)
+    typer.echo(f"Strategy: {strategy_name}")
+    typer.echo(f"Parameter grid: {grid_size} combinations")
+    typer.echo(f"Fetching {days} days of data...")
+
+    # Fetch data
+    import pandas as pd
+
+    try:
+        from hedgefund.data.providers.yfinance_provider import YFinanceProvider
+
+        yf_provider = YFinanceProvider()
+    except ImportError:
+        typer.echo("yfinance not available", err=True)
+        raise typer.Exit(code=1)
+
+    data: dict[str, pd.DataFrame] = {}
+    for sym in spec["symbols"]:
+        typer.echo(f"  Fetching {sym}...", nl=False)
+        try:
+            if sym.startswith("KRW-"):
+                from hedgefund.data.providers.upbit_provider import UpbitProvider
+
+                provider = UpbitProvider()
+            else:
+                provider = yf_provider
+            df = provider.get_ohlcv(sym, interval="day", count=days)
+            if df is not None and not df.empty:
+                data[sym] = df
+                typer.echo(f" {len(df)} bars")
+            else:
+                typer.echo(" NO DATA")
+        except Exception as e:
+            typer.echo(f" ERROR: {e}")
+
+    if not data:
+        typer.echo("No data fetched.", err=True)
+        raise typer.Exit(code=1)
+
+    # Run grid search
+    typer.echo(f"\n{'=' * 60}")
+    typer.echo(f" Grid Search: {strategy_name}")
+    typer.echo(f"{'=' * 60}")
+
+    result = run_grid_search(
+        strategy_factory=spec["factory"],
+        data=data,
+        param_grid=spec["grid"],
+        is_fraction=0.70,
+        backtest_config=spec["cost_config"],
+    )
+
+    typer.echo(f"\nTrials: {result.num_trials}")
+    typer.echo(f"Deflated Sharpe p-value: {result.deflated_sharpe_p:.4f}")
+    typer.echo(f"  (p > 0.95 = likely genuine skill)")
+
+    # Show top 5
+    typer.echo(f"\n{'=' * 60}")
+    typer.echo(" Top 5 Parameter Sets (by OOS Sharpe)")
+    typer.echo(f"{'=' * 60}")
+
+    for i, r in enumerate(result.all_results[:5]):
+        go_nogo = "GO" if r.passes_go_nogo else "NO"
+        typer.echo(f"\n#{i + 1} [{go_nogo}] {r.params}")
+        typer.echo(f"  IS Sharpe:  {r.is_sharpe:.3f}")
+        typer.echo(f"  OOS Sharpe: {r.oos_sharpe:.3f}")
+        typer.echo(f"  OOS Max DD: {r.oos_max_dd:.2%}")
+        typer.echo(f"  OOS PF:     {r.oos_profit_factor:.2f}")
+        typer.echo(f"  Efficiency: {r.efficiency:.3f}")
+
+    if result.best and result.best.passes_go_nogo and result.deflated_sharpe_p > 0.95:
+        typer.echo(f"\n✓ Best params pass Go/No-Go + DSR: {result.best.params}")
+    elif result.best and result.best.passes_go_nogo:
+        typer.echo(f"\n⚠ Best params pass Go/No-Go but DSR={result.deflated_sharpe_p:.4f} < 0.95")
+    else:
+        typer.echo("\n✗ No parameter set passes Go/No-Go criteria")
+
+    typer.echo(f"\n{'=' * 60}")
+
+
+@app.command()
 def uninstall_scheduler() -> None:
     """Uninstall launchd plist (stop daily scheduling)."""
     _setup_logging()
