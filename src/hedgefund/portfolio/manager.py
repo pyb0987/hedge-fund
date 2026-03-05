@@ -149,12 +149,16 @@ class PortfolioManager:
         prices = self._get_current_prices(all_signals)
         current_positions = self._get_current_positions()
 
+        max_position_value = total_value * self._risk_config.max_single_position
+
         target_values: dict[str, float] = {}
         for signal in all_signals:
             if signal.direction == SignalDirection.LONG:
                 strategy_allocation = allocation_weights.get(signal.strategy_name, 0.0)
                 # Target = portfolio_value × strategy_allocation × signal_strength × DD_multiplier
                 target = total_value * strategy_allocation * signal.strength * dd_multiplier
+                # Cap at single position limit (15%) to avoid guaranteed risk rejection
+                target = min(target, max_position_value)
                 target_values[signal.symbol] = target
             else:
                 target_values[signal.symbol] = 0.0  # FLAT = close
