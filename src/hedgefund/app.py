@@ -52,13 +52,22 @@ class PaperRunResult:
 
 def _create_strategies(
     config_dir: Path,
+    settings: GlobalSettings,
 ) -> dict[str, Strategy]:
-    """Create strategy instances from YAML configs."""
+    """Create strategy instances from YAML configs.
+
+    Only loads strategies with allocation > 0 to avoid unnecessary API calls.
+    """
     configs = load_all_strategy_configs(config_dir)
     strategies: dict[str, Strategy] = {}
+    allocation = settings.allocation
 
     for name, config in configs.items():
-        strategies[name] = get_strategy(name, config=config)
+        alloc = getattr(allocation, name, 0.0)
+        if alloc > 0:
+            strategies[name] = get_strategy(name, config=config)
+        else:
+            logger.debug("Skipping %s (allocation=0)", name)
 
     return strategies
 
@@ -174,7 +183,7 @@ def run_once(
     settings = load_global_settings(config_dir)
 
     # 2. Create components
-    strategies = _create_strategies(config_dir)
+    strategies = _create_strategies(config_dir, settings)
     executors = _create_paper_executors(settings)
     providers = _create_providers()
 
@@ -185,9 +194,12 @@ def run_once(
     _setup_crypto_universe(strategies, providers)
 
     # 5. Create risk manager & portfolio manager
+    # Use deployed capital (sum of executor capitals) as initial, not total initial_capital.
+    # Otherwise unallocated cash buffer causes phantom drawdown on day 1.
+    deployed_capital = sum(e.get_account_info().total_value for e in executors.values())
     risk_manager = RiskManager(
         config=settings.risk,
-        initial_capital=settings.portfolio.initial_capital,
+        initial_capital=deployed_capital,
     )
 
     portfolio_mgr = PortfolioManager(
