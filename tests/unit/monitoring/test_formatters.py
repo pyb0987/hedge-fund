@@ -91,7 +91,7 @@ class TestFormatRiskAlertHtml:
 
 
 class TestFormatDailyDigestHtml:
-    def test_go_report(self) -> None:
+    def test_go_report_contains_all_sections(self) -> None:
         report = PaperReport(
             signal_fidelity=SignalFidelityReport(20, 15, 0.75),
             cost=CostReport(5000, 3000, 8000, 400),
@@ -105,9 +105,20 @@ class TestFormatDailyDigestHtml:
             data_end=datetime(2024, 6, 1),
         )
         msg = format_daily_digest_html(report)
-        assert "Daily Digest" in msg
-        assert "Overall: GO" in msg
+        # All 4 validation sections present
+        assert "Signal Fidelity" in msg
+        assert "Cost Accuracy" in msg
+        assert "Performance" in msg
+        assert "Risk Compliance" in msg
+        # Key metrics
         assert "Sharpe: 1.20" in msg
+        assert "Overall: GO" in msg
+        # Cost data
+        assert "Commission:" in msg
+        assert "Slippage:" in msg
+        # Risk data
+        assert "Max Observed DD:" in msg
+        assert "DD Activations:" in msg
 
     def test_nogo_report(self) -> None:
         report = PaperReport(
@@ -124,3 +135,4 @@ class TestFormatDailyDigestHtml:
         )
         msg = format_daily_digest_html(report)
         assert "NO-GO" in msg
+        assert "need 10+ cycles" in msg

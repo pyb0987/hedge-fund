@@ -1,76 +1,278 @@
-"""APScheduler-based trading scheduler.
+"""Daily paper trading scheduler.
 
-전략별 리밸런싱 주기에 따라 run_cycle을 자동 실행합니다.
-- Crypto Momentum: 주간 (일요일 21:00 KST)
-- ETF Mean Reversion: 주간 (금요일 22:00 KST / US market close)
-- Dual Momentum: 월간 (매월 1일)
+cwaa 프로젝트 패턴 기반:
+- launchd plist (macOS) / cron (Linux) 로 외부 트리거
+- UTC 기반 일일 멱등성 가드 (DarkWake 방지)
+- 하루 1회 실행: paper-run → report 생성 → Telegram digest 전송
+
+사용:
+    uv run python -m hedgefund daily-run          # 1회 실행 (가드 적용)
+    uv run python -m hedgefund install-scheduler   # launchd plist 설치
 """
 
+import json
 import logging
-from datetime import datetime
-from typing import Callable
-
-from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+PLIST_NAME = "com.hedgefund.paper"
+PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_NAME}.plist"
+RUN_LOG_PATH = Path("data/paper_state/run_log.json")
+LOG_DIR = Path.home() / "Library" / "Logs" / "hedgefund"
 
-def create_scheduler(
-    run_cycle_fn: Callable[[], None],
-    crypto_cron: str = "0 21 * * 0",  # Sunday 21:00
-    etf_cron: str = "0 22 * * 5",  # Friday 22:00
-    dual_cron: str = "0 9 1 * *",  # 1st of month 09:00
-    timezone: str = "Asia/Seoul",
-) -> BlockingScheduler:
-    """Create and configure the trading scheduler.
+
+# --- Daily idempotency guard (UTC-based, cwaa pattern) ---
+
+
+def has_run_today(log_path: Path = RUN_LOG_PATH) -> bool:
+    """Check if daily cycle already ran today (UTC date)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if not log_path.exists():
+        return False
+    try:
+        data = json.loads(log_path.read_text())
+        return data.get("last_run_date") == today
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def mark_run_today(log_path: Path = RUN_LOG_PATH) -> None:
+    """Mark today's run as completed (UTC date)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(json.dumps({
+        "last_run_date": today,
+        "last_run_utc": datetime.now(timezone.utc).isoformat(),
+    }))
+
+
+# --- Daily cycle: paper-run → report → Telegram digest ---
+
+
+def run_daily_cycle(
+    config_dir: Path = Path("config"),
+    force: bool = False,
+) -> bool:
+    """Execute the full daily paper trading cycle.
+
+    1. Check idempotency guard (skip if already ran today)
+    2. Run paper trading cycle
+    3. Generate validation report
+    4. Send Telegram daily digest
 
     Args:
-        run_cycle_fn: function to call on each schedule trigger
-        crypto_cron: cron expression for crypto momentum
-        etf_cron: cron expression for ETF mean reversion
-        dual_cron: cron expression for dual momentum
-        timezone: timezone for cron triggers
+        config_dir: path to config directory
+        force: skip idempotency guard
 
     Returns:
-        Configured BlockingScheduler (call .start() to run)
+        True if cycle executed, False if skipped
     """
-    scheduler = BlockingScheduler(timezone=timezone)
+    if not force and has_run_today():
+        logger.info("Already ran today (UTC) — skipping")
+        return False
 
-    scheduler.add_job(
-        run_cycle_fn,
-        trigger=CronTrigger.from_crontab(crypto_cron, timezone=timezone),
-        id="crypto_momentum_cycle",
-        name="Crypto Momentum Weekly Rebalance",
-        misfire_grace_time=3600,
+    logger.info("=== Daily Paper Trading Cycle Start ===")
+
+    from hedgefund.app import run_once
+    from hedgefund.config.loader import load_global_settings
+    from hedgefund.data.store import DataStore
+    from hedgefund.monitoring.paper_report import (
+        ReportThresholds,
+        format_report,
+        generate_report,
     )
 
-    scheduler.add_job(
-        run_cycle_fn,
-        trigger=CronTrigger.from_crontab(etf_cron, timezone=timezone),
-        id="etf_mean_reversion_cycle",
-        name="ETF Mean Reversion Weekly Rebalance",
-        misfire_grace_time=3600,
-    )
-
-    scheduler.add_job(
-        run_cycle_fn,
-        trigger=CronTrigger.from_crontab(dual_cron, timezone=timezone),
-        id="dual_momentum_cycle",
-        name="Dual Momentum Monthly Rebalance",
-        misfire_grace_time=3600,
-    )
-
-    logger.info("Scheduler configured with 3 jobs (timezone: %s)", timezone)
-    return scheduler
-
-
-def run_scheduler(scheduler: BlockingScheduler) -> None:
-    """Start the scheduler (blocking)."""
-    logger.info("Starting trading scheduler...")
+    # Step 1: Run paper trading cycle
     try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Scheduler stopped by user")
-    finally:
-        scheduler.shutdown(wait=False)
+        result = run_once(config_dir=config_dir, dry_run=False)
+        logger.info(
+            "Paper run complete: signals=%d, trades=%d, value=%.0f",
+            len(result.cycle_result.signals),
+            result.cycle_result.num_trades,
+            result.portfolio_value,
+        )
+    except Exception:
+        logger.exception("Paper run failed")
+        _send_error_notification(config_dir, "Paper run failed")
+        return False
+
+    # Step 2: Generate validation report
+    try:
+        settings = load_global_settings(config_dir)
+        store = DataStore(settings.data.sqlite_path)
+        report = generate_report(store, ReportThresholds())
+        report_text = format_report(report)
+        logger.info("Report generated:\n%s", report_text)
+    except Exception:
+        logger.exception("Report generation failed")
+        mark_run_today()
+        return True
+
+    # Step 3: Send Telegram daily digest (includes validation data)
+    try:
+        tg_config = settings.monitoring.telegram
+        if tg_config.enabled and tg_config.bot_token:
+            from hedgefund.monitoring.telegram import TelegramConfig, TelegramNotifier
+
+            notifier = TelegramNotifier(TelegramConfig(
+                bot_token=tg_config.bot_token,
+                chat_id=tg_config.chat_id,
+                enabled=True,
+            ))
+            notifier.notify_daily_digest(report)
+            notifier.close()
+            logger.info("Telegram daily digest sent")
+    except Exception:
+        logger.exception("Telegram digest failed — continuing")
+
+    mark_run_today()
+    logger.info("=== Daily Paper Trading Cycle Complete ===")
+    return True
+
+
+def _send_error_notification(config_dir: Path, message: str) -> None:
+    """Send error notification via Telegram."""
+    try:
+        from hedgefund.config.loader import load_global_settings
+        from hedgefund.monitoring.telegram import TelegramConfig, TelegramNotifier
+
+        settings = load_global_settings(config_dir)
+        tg = settings.monitoring.telegram
+        if not tg.enabled or not tg.bot_token:
+            return
+
+        notifier = TelegramNotifier(TelegramConfig(
+            bot_token=tg.bot_token,
+            chat_id=tg.chat_id,
+            enabled=True,
+        ))
+        notifier.send_message(f"<b>ERROR</b>\n{message}")
+        notifier.close()
+    except Exception:
+        logger.exception("Error notification also failed")
+
+
+# --- launchd plist installer (macOS, cwaa pattern) ---
+
+
+def generate_plist(
+    project_dir: Path,
+    python_path: Path,
+    hour: int = 21,
+    minute: int = 0,
+) -> str:
+    """Generate launchd plist XML for daily paper trading.
+
+    Uses StartCalendarInterval for exact 21:00 KST trigger.
+    caffeinate -s prevents sleep during execution.
+
+    Args:
+        project_dir: absolute path to project root
+        python_path: absolute path to Python interpreter
+        hour: local hour to run (default: 21 = 9PM KST)
+        minute: local minute to run (default: 0)
+    """
+    log_dir = LOG_DIR
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{PLIST_NAME}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-s</string>
+        <string>{python_path}</string>
+        <string>-m</string>
+        <string>hedgefund</string>
+        <string>daily-run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{project_dir}</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>{hour}</integer>
+        <key>Minute</key>
+        <integer>{minute}</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>{log_dir}/hedgefund.log</string>
+    <key>StandardErrorPath</key>
+    <string>{log_dir}/hedgefund-error.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:{project_dir}/.venv/bin</string>
+    </dict>
+</dict>
+</plist>"""
+
+
+def install_plist(
+    project_dir: Path | None = None,
+    python_path: Path | None = None,
+    hour: int = 21,
+    minute: int = 0,
+) -> Path:
+    """Install launchd plist for daily paper trading.
+
+    Returns the installed plist path.
+    """
+    if project_dir is None:
+        project_dir = Path.cwd()
+    if python_path is None:
+        python_path = Path(sys.executable)
+
+    # Ensure log directory exists
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Generate and write plist
+    plist_content = generate_plist(project_dir, python_path, hour, minute)
+    PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PLIST_PATH.write_text(plist_content)
+    logger.info("Plist written to %s", PLIST_PATH)
+
+    # Unload existing (ignore errors if not loaded)
+    subprocess.run(
+        ["launchctl", "unload", str(PLIST_PATH)],
+        capture_output=True,
+    )
+
+    # Load new plist
+    result = subprocess.run(
+        ["launchctl", "load", str(PLIST_PATH)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error("launchctl load failed: %s", result.stderr)
+    else:
+        logger.info("launchd job loaded: %s", PLIST_NAME)
+
+    return PLIST_PATH
+
+
+def uninstall_plist() -> bool:
+    """Uninstall launchd plist."""
+    if not PLIST_PATH.exists():
+        return False
+
+    subprocess.run(
+        ["launchctl", "unload", str(PLIST_PATH)],
+        capture_output=True,
+    )
+    PLIST_PATH.unlink()
+    logger.info("Plist removed: %s", PLIST_PATH)
+    return True

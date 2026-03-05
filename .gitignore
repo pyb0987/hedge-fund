@@ -25,3 +25,7 @@ venv/
 *.swo
 
 docker/*.env
+
+# Config secrets — use settings.yaml.example as template
+config/settings.yaml
+data/paper_state/

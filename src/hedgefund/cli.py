@@ -5,6 +5,8 @@ Usage:
     uv run python -m hedgefund paper-run --dry-run
     uv run python -m hedgefund paper-status
     uv run python -m hedgefund paper-report
+    uv run python -m hedgefund daily-run
+    uv run python -m hedgefund install-scheduler
 """
 
 import logging
@@ -168,3 +170,70 @@ def paper_report(
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from e
+
+
+@app.command()
+def daily_run(
+    config_dir: Path = typer.Option(
+        Path("config"), help="Config directory path",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Skip idempotency guard (run even if already ran today)",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable debug logging",
+    ),
+) -> None:
+    """Run daily paper trading cycle (paper-run + report + Telegram digest).
+
+    Includes UTC-based idempotency guard — safe to call multiple times.
+    """
+    _setup_logging(verbose)
+
+    from hedgefund.scheduler.runner import run_daily_cycle
+
+    try:
+        executed = run_daily_cycle(config_dir=config_dir, force=force)
+        if executed:
+            typer.echo("Daily cycle completed successfully.")
+        else:
+            typer.echo("Already ran today — skipped. Use --force to override.")
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
+
+
+@app.command()
+def install_scheduler(
+    hour: int = typer.Option(21, help="Hour to run (local time, default: 21)"),
+    minute: int = typer.Option(0, help="Minute to run (default: 0)"),
+) -> None:
+    """Install launchd plist for daily paper trading at specified time.
+
+    Default: 21:00 KST daily.
+    """
+    _setup_logging()
+
+    from hedgefund.scheduler.runner import install_plist
+
+    try:
+        plist_path = install_plist(hour=hour, minute=minute)
+        typer.echo(f"Scheduler installed: {plist_path}")
+        typer.echo(f"Daily run at {hour:02d}:{minute:02d} (local time)")
+        typer.echo("Logs: ~/Library/Logs/hedgefund/")
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
+
+
+@app.command()
+def uninstall_scheduler() -> None:
+    """Uninstall launchd plist (stop daily scheduling)."""
+    _setup_logging()
+
+    from hedgefund.scheduler.runner import uninstall_plist
+
+    if uninstall_plist():
+        typer.echo("Scheduler uninstalled.")
+    else:
+        typer.echo("No scheduler found to uninstall.")
