@@ -1,5 +1,6 @@
 """SQLite data store for persisting OHLCV data and portfolio state."""
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -54,6 +55,19 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
 )
 """
 
+_SIGNALS_TABLE = """
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    strategy_name TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    exchange TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    strength REAL NOT NULL,
+    metadata TEXT
+)
+"""
+
 
 class DataStore:
     """SQLite-backed persistent data store."""
@@ -83,6 +97,7 @@ class DataStore:
             conn.execute(_OHLCV_TABLE)
             conn.execute(_TRADES_TABLE)
             conn.execute(_SNAPSHOTS_TABLE)
+            conn.execute(_SIGNALS_TABLE)
 
     def save_ohlcv(
         self,
@@ -199,4 +214,71 @@ class DataStore:
         if not df.empty:
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             df = df.set_index("timestamp")
+        return df
+
+    def save_trade(
+        self,
+        symbol: str,
+        exchange: str,
+        side: str,
+        quantity: float,
+        price: float,
+        commission: float,
+        slippage: float,
+        strategy_name: str,
+        timestamp: datetime,
+        pnl: float | None = None,
+    ) -> None:
+        """Save a single trade record."""
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO trades "
+                "(symbol, exchange, side, quantity, price, commission, slippage, "
+                "strategy_name, timestamp, pnl) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (symbol, exchange, side, quantity, price, commission, slippage,
+                 strategy_name, str(timestamp), pnl),
+            )
+
+    def load_trades(self) -> pd.DataFrame:
+        """Load all trade records."""
+        with self._connection() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM trades ORDER BY timestamp ASC",
+                conn,
+            )
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+        return df
+
+    def save_signal(
+        self,
+        timestamp: datetime,
+        strategy_name: str,
+        symbol: str,
+        exchange: str,
+        direction: str,
+        strength: float,
+        metadata: dict | None = None,
+    ) -> None:
+        """Save a single signal record."""
+        meta_str = json.dumps(metadata) if metadata else None
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO signals "
+                "(timestamp, strategy_name, symbol, exchange, direction, strength, metadata) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (str(timestamp), strategy_name, symbol, exchange, direction,
+                 strength, meta_str),
+            )
+
+    def load_signals(self) -> pd.DataFrame:
+        """Load all signal records."""
+        with self._connection() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM signals ORDER BY timestamp ASC",
+                conn,
+            )
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df

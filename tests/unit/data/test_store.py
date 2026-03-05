@@ -80,3 +80,68 @@ class TestDataStore:
         empty = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         inserted = store.save_ohlcv("TEST", "test", empty)
         assert inserted == 0
+
+    def test_save_and_load_trade(self, store: DataStore) -> None:
+        store.save_trade(
+            symbol="KRW-BTC",
+            exchange="upbit",
+            side="buy",
+            quantity=0.01,
+            price=50_000_000,
+            commission=1250.0,
+            slippage=750.0,
+            strategy_name="crypto_momentum",
+            timestamp=datetime(2024, 3, 1, 21, 0),
+            pnl=None,
+        )
+        trades = store.load_trades()
+        assert len(trades) == 1
+        assert trades.iloc[0]["symbol"] == "KRW-BTC"
+        assert trades.iloc[0]["commission"] == 1250.0
+
+    def test_save_and_load_signal(self, store: DataStore) -> None:
+        store.save_signal(
+            timestamp=datetime(2024, 3, 1, 21, 0),
+            strategy_name="crypto_momentum",
+            symbol="KRW-BTC",
+            exchange="upbit",
+            direction="long",
+            strength=0.85,
+            metadata={"momentum_score": 0.15, "rank": 1.0},
+        )
+        signals = store.load_signals()
+        assert len(signals) == 1
+        assert signals.iloc[0]["strategy_name"] == "crypto_momentum"
+        assert signals.iloc[0]["direction"] == "long"
+        assert signals.iloc[0]["strength"] == 0.85
+
+    def test_save_signal_no_metadata(self, store: DataStore) -> None:
+        store.save_signal(
+            timestamp=datetime(2024, 3, 1),
+            strategy_name="test",
+            symbol="SPY",
+            exchange="alpaca",
+            direction="flat",
+            strength=0.0,
+            metadata=None,
+        )
+        signals = store.load_signals()
+        assert len(signals) == 1
+        assert signals.iloc[0]["metadata"] is None
+
+    def test_multiple_trades_ordering(self, store: DataStore) -> None:
+        for i, ts in enumerate([
+            datetime(2024, 3, 1, 21, 0),
+            datetime(2024, 3, 8, 21, 0),
+            datetime(2024, 3, 15, 21, 0),
+        ]):
+            store.save_trade(
+                symbol="KRW-BTC", exchange="upbit", side="buy",
+                quantity=0.01, price=50_000_000 + i * 100_000,
+                commission=1250.0, slippage=750.0,
+                strategy_name="crypto_momentum", timestamp=ts,
+            )
+        trades = store.load_trades()
+        assert len(trades) == 3
+        # Should be ordered by timestamp
+        assert trades.iloc[0]["timestamp"] < trades.iloc[2]["timestamp"]
