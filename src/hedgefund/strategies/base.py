@@ -5,6 +5,7 @@ The ABC provides common utilities (logging, config access).
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -12,6 +13,16 @@ import pandas as pd
 
 from hedgefund.core.enums import Exchange
 from hedgefund.core.models import Signal
+
+
+@dataclass(frozen=True)
+class RebalanceDecision:
+    """Audit record of a strategy's rebalancing gate check."""
+
+    should_rebalance: bool
+    reason: str  # e.g. "holding_period_met", "monthly_gate", "no_gate", "too_early"
+    days_since_last: int | None = None
+    gate_days: int | None = None
 
 
 @runtime_checkable
@@ -73,6 +84,13 @@ class BaseStrategy(ABC):
     @abstractmethod
     def get_universe(self) -> list[str]:
         ...
+
+    def get_rebalance_decision(self, timestamp: datetime) -> RebalanceDecision:
+        """Return audit info about rebalancing gate status.
+
+        Default: no gate (always rebalances). Override in strategies with gates.
+        """
+        return RebalanceDecision(should_rebalance=True, reason="no_gate")
 
     @staticmethod
     def compute_returns(prices: pd.Series) -> pd.Series:

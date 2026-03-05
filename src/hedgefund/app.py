@@ -29,7 +29,7 @@ from hedgefund.execution.state import (
 )
 from hedgefund.portfolio.manager import CycleResult, PortfolioManager
 from hedgefund.risk.manager import RiskManager
-from hedgefund.strategies.base import Strategy
+from hedgefund.strategies.base import RebalanceDecision, Strategy
 from hedgefund.strategies.registry import get_strategy
 
 logger = logging.getLogger(__name__)
@@ -226,21 +226,36 @@ def run_once(
         }
         executor.set_prices(exchange_prices)
 
-    # 8. Run cycle
+    # 8. Capture rebalance decisions (before signals change strategy state)
+    rebalance_decisions: dict[str, RebalanceDecision] = {}
+    for name, strategy in strategies.items():
+        if hasattr(strategy, "get_rebalance_decision"):
+            rebalance_decisions[name] = strategy.get_rebalance_decision(now)  # type: ignore[attr-defined]
+
+    # 9. Capture DD multiplier for audit
+    dd_state = risk_manager.get_drawdown_state(deployed_capital)
+    dd_multiplier = dd_state.position_multiplier
+
+    # 10. Run cycle
     cycle_result = portfolio_mgr.run_cycle(collection.data, timestamp=now)
 
-    # 9. Log results
+    # 11. Log results
     _log_cycle_result(cycle_result, executors)
 
-    # 9b. Send Telegram notification
+    # 11b. Send Telegram notification
     _send_telegram_notification(settings, cycle_result, collection)
 
-    # 10. Persist everything
+    # 12. Persist everything
     if not dry_run:
         save_state(executors[Exchange.UPBIT], UPBIT_STATE)
         save_state(executors[Exchange.ALPACA], ALPACA_STATE)
         save_strategy_state(strategies, STRATEGY_STATE)
-        _persist_cycle_data(settings, cycle_result, executors, risk_manager)
+        _persist_cycle_data(
+            settings, cycle_result, executors, risk_manager,
+            strategies=strategies, collection=collection,
+            rebalance_decisions=rebalance_decisions,
+            dd_multiplier=dd_multiplier,
+        )
 
     logger.info("=== Paper Trading Cycle Complete ===")
 
@@ -333,8 +348,12 @@ def _persist_cycle_data(
     result: CycleResult,
     executors: dict[Exchange, PaperExecutor],
     risk_manager: RiskManager,
+    strategies: dict[str, Strategy] | None = None,
+    collection: CollectionResult | None = None,
+    rebalance_decisions: dict[str, RebalanceDecision] | None = None,
+    dd_multiplier: float = 1.0,
 ) -> None:
-    """Persist signals, trades, and snapshot to SQLite for validation analysis."""
+    """Persist signals, trades, positions, decisions, and OHLCV to SQLite."""
     try:
         store = DataStore(settings.data.sqlite_path)
 
@@ -354,7 +373,6 @@ def _persist_cycle_data(
         cycle_realized_pnl = 0.0
         for execution in result.executions:
             if execution.success:
-                # Extract PnL from paper executor's trade records
                 trade_pnl = _find_trade_pnl(executors, execution)
                 if trade_pnl is not None:
                     cycle_realized_pnl += trade_pnl
@@ -372,7 +390,6 @@ def _persist_cycle_data(
                     pnl=trade_pnl,
                 )
             else:
-                # Save failed execution as risk event
                 store.save_risk_event(
                     timestamp=result.timestamp,
                     event_type="execution_failed",
@@ -385,7 +402,7 @@ def _persist_cycle_data(
                     strategy_name=execution.order.strategy_name,
                 )
 
-        # C. Save portfolio snapshot with real drawdown (for Performance validation)
+        # C. Save portfolio snapshot with real drawdown
         total_value = sum(
             e.get_account_info().total_value for e in executors.values()
         )
@@ -405,8 +422,25 @@ def _persist_cycle_data(
             peak_value=dd_state.peak_value,
         )
 
-        # D. Save risk events from portfolio manager cycle
+        # D. Save risk events
         _persist_risk_events(store, result, risk_manager, total_value)
+
+        # E. Save position snapshots (per-strategy attribution)
+        if strategies is not None:
+            _persist_position_snapshots(
+                store, result.timestamp, strategies, executors,
+            )
+
+        # F. Save strategy decisions (rebalance gate + allocation audit)
+        if strategies is not None and rebalance_decisions is not None:
+            _persist_strategy_decisions(
+                store, result, strategies, settings.allocation,
+                rebalance_decisions, dd_multiplier, total_value,
+            )
+
+        # G. Save OHLCV market data for post-hoc verification
+        if collection is not None:
+            _persist_ohlcv(store, collection)
 
     except Exception:
         logger.exception("Failed to persist cycle data")
@@ -466,3 +500,87 @@ def _persist_risk_events(
             limit_value=risk_manager.config.max_portfolio_drawdown,
             message=result.risk_reason or "Max drawdown breached",
         )
+
+
+def _persist_position_snapshots(
+    store: DataStore,
+    timestamp: datetime,
+    strategies: dict[str, Strategy],
+    executors: dict[Exchange, PaperExecutor],
+) -> None:
+    """Save per-position snapshot with strategy attribution."""
+    # Build symbol → strategy_name mapping from strategy universes
+    symbol_strategy: dict[str, str] = {}
+    for name, strategy in strategies.items():
+        for sym in strategy.get_universe():
+            # Last-write wins if symbols overlap (e.g., BIL in treasury + dual)
+            symbol_strategy[sym] = name
+
+    for executor in executors.values():
+        for sym, pos in executor._positions.items():
+            market_price = executor.get_current_price(sym)
+            market_value = pos.quantity * market_price
+            unrealized_pnl = (market_price - pos.avg_entry_price) * pos.quantity
+
+            store.save_position_snapshot(
+                timestamp=timestamp,
+                symbol=sym,
+                exchange=pos.exchange.value,
+                strategy_name=symbol_strategy.get(sym, "unknown"),
+                quantity=pos.quantity,
+                avg_entry_price=pos.avg_entry_price,
+                market_price=market_price,
+                market_value=market_value,
+                unrealized_pnl=unrealized_pnl,
+            )
+
+
+def _persist_strategy_decisions(
+    store: DataStore,
+    result: "CycleResult",
+    strategies: dict[str, Strategy],
+    allocation: "AllocationConfig",
+    rebalance_decisions: dict[str, RebalanceDecision],
+    dd_multiplier: float,
+    total_value: float,
+) -> None:
+    """Save rebalancing gate decisions and allocation audit trail."""
+    # Count signals per strategy
+    signals_per_strategy: dict[str, int] = {}
+    for signal in result.signals:
+        signals_per_strategy[signal.strategy_name] = (
+            signals_per_strategy.get(signal.strategy_name, 0) + 1
+        )
+
+    for name in strategies:
+        decision = rebalance_decisions.get(name)
+        if decision is None:
+            continue
+
+        target_alloc = getattr(allocation, name, 0.0)
+        n_signals = signals_per_strategy.get(name, 0)
+
+        action = "rebalance" if decision.should_rebalance else "hold"
+        if n_signals == 0 and decision.should_rebalance:
+            action = "skip_no_data"
+
+        store.save_strategy_decision(
+            timestamp=result.timestamp,
+            strategy_name=name,
+            action=action,
+            reason=decision.reason,
+            signals_generated=n_signals,
+            target_allocation=target_alloc,
+            actual_allocation=0.0,  # computed from position_snapshots in report
+            dd_multiplier=dd_multiplier,
+        )
+
+
+def _persist_ohlcv(store: DataStore, collection: CollectionResult) -> None:
+    """Save collected OHLCV data for post-hoc price verification."""
+    for strategy_name, strategy_data in collection.data.items():
+        for symbol, df in strategy_data.items():
+            if df.empty:
+                continue
+            exchange = "upbit" if symbol.startswith("KRW-") else "alpaca"
+            store.save_ohlcv(symbol, exchange, df)

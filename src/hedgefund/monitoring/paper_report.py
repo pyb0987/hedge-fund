@@ -5,10 +5,13 @@ Reads signals, trades, and snapshots from DataStore and computes:
 2. Cost Accuracy: actual vs modeled costs
 3. Performance: Sharpe, DD, Profit Factor, etc.
 4. Risk Compliance: drawdown activations, position limit adherence
-5. Validation: Go/No-Go thresholds
+5. Per-Strategy Attribution: performance breakdown per strategy
+6. Rebalancing Gate: audit of hold vs rebalance decisions
+7. Holding Period: distribution per strategy
+8. Validation: Go/No-Go thresholds
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import numpy as np
@@ -77,6 +80,42 @@ class RiskComplianceReport:
 
 
 @dataclass(frozen=True)
+class StrategyPerformanceReport:
+    """Per-strategy performance from position snapshots."""
+
+    strategy_name: str
+    total_value: float  # latest market value
+    total_pnl: float  # sum of unrealized PnL
+    num_positions: int  # current position count
+    avg_holding_days: float  # average holding period
+    trade_count: int
+    total_commission: float
+
+
+@dataclass(frozen=True)
+class RebalancingGateReport:
+    """Rebalancing gate audit summary per strategy."""
+
+    strategy_name: str
+    total_decisions: int
+    rebalance_count: int
+    hold_count: int
+    skip_count: int
+    avg_dd_multiplier: float
+
+
+@dataclass(frozen=True)
+class HoldingPeriodReport:
+    """Holding period distribution per strategy."""
+
+    strategy_name: str
+    avg_days: float
+    min_days: int
+    max_days: int
+    num_positions_tracked: int
+
+
+@dataclass(frozen=True)
 class ValidationResult:
     """Go/No-Go decision."""
 
@@ -95,6 +134,9 @@ class PaperReport:
     cost: CostReport
     performance: PerformanceReport
     risk_compliance: RiskComplianceReport
+    strategy_performance: tuple[StrategyPerformanceReport, ...]
+    rebalancing_gates: tuple[RebalancingGateReport, ...]
+    holding_periods: tuple[HoldingPeriodReport, ...]
     validation: ValidationResult
     generated_at: datetime
     data_start: datetime | None
@@ -108,10 +150,7 @@ def analyze_signal_fidelity(
     signals_df: pd.DataFrame,
     trades_df: pd.DataFrame,
 ) -> SignalFidelityReport:
-    """Compute signal-to-trade conversion rate.
-
-    Matches signals to trades by (date, symbol, strategy_name).
-    """
+    """Compute signal-to-trade conversion rate."""
     total_signals = len(signals_df)
     total_trades = len(trades_df)
 
@@ -217,11 +256,9 @@ def analyze_risk_compliance(
     # Progressive drawdown activates at 5%
     activations = int(np.sum(drawdowns > 0.05))
 
-    # Count risk rejections and blocked cycles from risk_events table
     risk_rejections = 0
     cycles_blocked = 0
     if risk_events_df is not None and not risk_events_df.empty:
-        # Count orders rejected by risk system or execution failures
         is_rejection = (
             (risk_events_df["event_type"] == "execution_failed")
             | ((risk_events_df["passed"] == 0)
@@ -238,6 +275,140 @@ def analyze_risk_compliance(
         risk_rejections=risk_rejections,
         cycles_blocked=cycles_blocked,
     )
+
+
+def analyze_strategy_performance(
+    position_snapshots_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+) -> tuple[StrategyPerformanceReport, ...]:
+    """Compute per-strategy performance from position snapshots and trades."""
+    if position_snapshots_df.empty:
+        return ()
+
+    reports: list[StrategyPerformanceReport] = []
+
+    # Get latest snapshot per strategy
+    latest_ts = position_snapshots_df.index.max()
+    latest = position_snapshots_df.loc[position_snapshots_df.index == latest_ts]
+
+    strategy_names = sorted(latest["strategy_name"].unique())
+
+    for name in strategy_names:
+        strat_positions = latest[latest["strategy_name"] == name]
+        total_value = float(strat_positions["market_value"].sum())
+        total_pnl = float(strat_positions["unrealized_pnl"].sum())
+        num_positions = len(strat_positions)
+
+        # Trade stats
+        strat_trades = trades_df[trades_df["strategy_name"] == name] if not trades_df.empty else pd.DataFrame()
+        trade_count = len(strat_trades)
+        total_commission = float(strat_trades["commission"].sum()) if not strat_trades.empty else 0.0
+
+        # Holding period from position snapshots (first → last appearance)
+        strat_all = position_snapshots_df[
+            position_snapshots_df["strategy_name"] == name
+        ]
+        avg_holding = _compute_avg_holding_days(strat_all)
+
+        reports.append(StrategyPerformanceReport(
+            strategy_name=name,
+            total_value=total_value,
+            total_pnl=total_pnl,
+            num_positions=num_positions,
+            avg_holding_days=avg_holding,
+            trade_count=trade_count,
+            total_commission=total_commission,
+        ))
+
+    return tuple(reports)
+
+
+def analyze_rebalancing_gates(
+    decisions_df: pd.DataFrame,
+) -> tuple[RebalancingGateReport, ...]:
+    """Analyze rebalancing gate decisions per strategy."""
+    if decisions_df.empty:
+        return ()
+
+    reports: list[RebalancingGateReport] = []
+
+    for name in sorted(decisions_df["strategy_name"].unique()):
+        strat = decisions_df[decisions_df["strategy_name"] == name]
+        total = len(strat)
+        rebalance = int((strat["action"] == "rebalance").sum())
+        hold = int((strat["action"] == "hold").sum())
+        skip = int((strat["action"] == "skip_no_data").sum())
+        avg_dd = float(strat["dd_multiplier"].mean()) if total > 0 else 1.0
+
+        reports.append(RebalancingGateReport(
+            strategy_name=name,
+            total_decisions=total,
+            rebalance_count=rebalance,
+            hold_count=hold,
+            skip_count=skip,
+            avg_dd_multiplier=avg_dd,
+        ))
+
+    return tuple(reports)
+
+
+def analyze_holding_periods(
+    position_snapshots_df: pd.DataFrame,
+) -> tuple[HoldingPeriodReport, ...]:
+    """Compute holding period distribution per strategy from position snapshots."""
+    if position_snapshots_df.empty:
+        return ()
+
+    reports: list[HoldingPeriodReport] = []
+
+    for name in sorted(position_snapshots_df["strategy_name"].unique()):
+        strat = position_snapshots_df[
+            position_snapshots_df["strategy_name"] == name
+        ]
+        holding_days = _compute_holding_days_per_symbol(strat)
+
+        if not holding_days:
+            reports.append(HoldingPeriodReport(
+                strategy_name=name, avg_days=0.0,
+                min_days=0, max_days=0, num_positions_tracked=0,
+            ))
+            continue
+
+        reports.append(HoldingPeriodReport(
+            strategy_name=name,
+            avg_days=float(np.mean(holding_days)),
+            min_days=int(min(holding_days)),
+            max_days=int(max(holding_days)),
+            num_positions_tracked=len(holding_days),
+        ))
+
+    return tuple(reports)
+
+
+def _compute_holding_days_per_symbol(strat_df: pd.DataFrame) -> list[int]:
+    """Compute holding days for each symbol from position snapshot appearances."""
+    if strat_df.empty:
+        return []
+
+    holding_days: list[int] = []
+    for symbol in strat_df["symbol"].unique():
+        sym_data = strat_df[strat_df["symbol"] == symbol]
+        dates = sorted(sym_data.index.unique())
+        if len(dates) < 1:
+            continue
+        first = dates[0]
+        last = dates[-1]
+        days = (last - first).days
+        # Minimum 1 day (single-snapshot positions)
+        holding_days.append(max(1, days))
+
+    return holding_days
+
+
+def _compute_avg_holding_days(strat_df: pd.DataFrame) -> float:
+    """Compute average holding days from position snapshots."""
+    days = _compute_holding_days_per_symbol(strat_df)
+    return float(np.mean(days)) if days else 0.0
 
 
 def validate(
@@ -270,11 +441,16 @@ def generate_report(
     trades_df = store.load_trades()
     snapshots_df = store.load_snapshots()
     risk_events_df = store.load_risk_events()
+    position_snapshots_df = store.load_position_snapshots()
+    decisions_df = store.load_strategy_decisions()
 
     signal_fidelity = analyze_signal_fidelity(signals_df, trades_df)
     cost = analyze_costs(trades_df)
     performance = analyze_performance(snapshots_df, thresholds)
     risk_compliance = analyze_risk_compliance(snapshots_df, risk_events_df)
+    strategy_perf = analyze_strategy_performance(position_snapshots_df, trades_df)
+    rebalancing_gates = analyze_rebalancing_gates(decisions_df)
+    holding_periods = analyze_holding_periods(position_snapshots_df)
     validation_result = validate(performance, thresholds)
 
     # Determine data range
@@ -289,6 +465,9 @@ def generate_report(
         cost=cost,
         performance=performance,
         risk_compliance=risk_compliance,
+        strategy_performance=strategy_perf,
+        rebalancing_gates=rebalancing_gates,
+        holding_periods=holding_periods,
         validation=validation_result,
         generated_at=now,
         data_start=data_start,
@@ -348,6 +527,46 @@ def format_report(report: PaperReport) -> str:
         f"  DD Activations:     {risk.drawdown_activations:>10d}",
         f"  Risk Rejections:    {risk.risk_rejections:>10d}",
         f"  Cycles Blocked:     {risk.cycles_blocked:>10d}",
+    ])
+
+    # Per-strategy performance
+    if report.strategy_performance:
+        lines.extend(["", "Per-Strategy Performance:"])
+        for sp in report.strategy_performance:
+            lines.extend([
+                f"  [{sp.strategy_name}]",
+                f"    Value: {sp.total_value:>12,.0f}  "
+                f"PnL: {sp.total_pnl:>+10,.0f}  "
+                f"Positions: {sp.num_positions}  "
+                f"Trades: {sp.trade_count}",
+                f"    Avg Holding: {sp.avg_holding_days:.0f}d  "
+                f"Commission: {sp.total_commission:,.0f}",
+            ])
+
+    # Rebalancing gate audit
+    if report.rebalancing_gates:
+        lines.extend(["", "Rebalancing Gate Audit:"])
+        for rg in report.rebalancing_gates:
+            lines.append(
+                f"  [{rg.strategy_name}] "
+                f"rebalance={rg.rebalance_count} hold={rg.hold_count} "
+                f"skip={rg.skip_count} "
+                f"avg_dd_mult={rg.avg_dd_multiplier:.2f}"
+            )
+
+    # Holding periods
+    if report.holding_periods:
+        lines.extend(["", "Holding Periods:"])
+        for hp in report.holding_periods:
+            if hp.num_positions_tracked > 0:
+                lines.append(
+                    f"  [{hp.strategy_name}] "
+                    f"avg={hp.avg_days:.0f}d "
+                    f"min={hp.min_days}d max={hp.max_days}d "
+                    f"(n={hp.num_positions_tracked})"
+                )
+
+    lines.extend([
         "",
         "Go/No-Go Validation:",
         f"  [{'PASS' if val.sharpe_pass else 'FAIL'}] Sharpe >= 0.5",

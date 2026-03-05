@@ -68,6 +68,35 @@ CREATE TABLE IF NOT EXISTS signals (
 )
 """
 
+_POSITION_SNAPSHOTS_TABLE = """
+CREATE TABLE IF NOT EXISTS position_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    exchange TEXT NOT NULL,
+    strategy_name TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    avg_entry_price REAL NOT NULL,
+    market_price REAL NOT NULL,
+    market_value REAL NOT NULL,
+    unrealized_pnl REAL NOT NULL
+)
+"""
+
+_STRATEGY_DECISIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS strategy_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    strategy_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    signals_generated INTEGER NOT NULL,
+    target_allocation REAL NOT NULL,
+    actual_allocation REAL NOT NULL,
+    dd_multiplier REAL NOT NULL
+)
+"""
+
 _RISK_EVENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS risk_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +142,8 @@ class DataStore:
             conn.execute(_TRADES_TABLE)
             conn.execute(_SNAPSHOTS_TABLE)
             conn.execute(_SIGNALS_TABLE)
+            conn.execute(_POSITION_SNAPSHOTS_TABLE)
+            conn.execute(_STRATEGY_DECISIONS_TABLE)
             conn.execute(_RISK_EVENTS_TABLE)
 
     def save_ohlcv(
@@ -327,6 +358,75 @@ class DataStore:
         with self._connection() as conn:
             df = pd.read_sql_query(
                 "SELECT * FROM risk_events ORDER BY timestamp ASC",
+                conn,
+            )
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+        return df
+
+    def save_position_snapshot(
+        self,
+        timestamp: datetime,
+        symbol: str,
+        exchange: str,
+        strategy_name: str,
+        quantity: float,
+        avg_entry_price: float,
+        market_price: float,
+        market_value: float,
+        unrealized_pnl: float,
+    ) -> None:
+        """Save a single position snapshot row."""
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO position_snapshots "
+                "(timestamp, symbol, exchange, strategy_name, quantity, "
+                "avg_entry_price, market_price, market_value, unrealized_pnl) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(timestamp), symbol, exchange, strategy_name,
+                 quantity, avg_entry_price, market_price, market_value,
+                 unrealized_pnl),
+            )
+
+    def load_position_snapshots(self) -> pd.DataFrame:
+        """Load all position snapshots."""
+        with self._connection() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM position_snapshots ORDER BY timestamp ASC",
+                conn,
+            )
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+        return df
+
+    def save_strategy_decision(
+        self,
+        timestamp: datetime,
+        strategy_name: str,
+        action: str,
+        reason: str,
+        signals_generated: int,
+        target_allocation: float,
+        actual_allocation: float,
+        dd_multiplier: float,
+    ) -> None:
+        """Save a strategy rebalancing/allocation decision."""
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO strategy_decisions "
+                "(timestamp, strategy_name, action, reason, signals_generated, "
+                "target_allocation, actual_allocation, dd_multiplier) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(timestamp), strategy_name, action, reason,
+                 signals_generated, target_allocation, actual_allocation,
+                 dd_multiplier),
+            )
+
+    def load_strategy_decisions(self) -> pd.DataFrame:
+        """Load all strategy decisions."""
+        with self._connection() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM strategy_decisions ORDER BY timestamp ASC",
                 conn,
             )
         if not df.empty:

@@ -16,7 +16,7 @@ import pandas as pd
 from hedgefund.config.schemas import DualMomentumConfig
 from hedgefund.core.enums import Exchange, SignalDirection
 from hedgefund.core.models import Signal
-from hedgefund.strategies.base import BaseStrategy
+from hedgefund.strategies.base import BaseStrategy, RebalanceDecision
 
 
 class DualMomentumStrategy(BaseStrategy):
@@ -68,6 +68,32 @@ class DualMomentumStrategy(BaseStrategy):
 
         # New month — rebalance on or after rebalance_day
         return timestamp.day >= self._config.rebalance_day
+
+    def get_rebalance_decision(self, timestamp: datetime) -> RebalanceDecision:
+        if self._last_rebalance_date is None:
+            return RebalanceDecision(
+                should_rebalance=True, reason="first_run",
+                days_since_last=None, gate_days=None,
+            )
+        days_elapsed = (timestamp - self._last_rebalance_date).days
+        same_month = (
+            timestamp.year == self._last_rebalance_date.year
+            and timestamp.month == self._last_rebalance_date.month
+        )
+        if same_month:
+            return RebalanceDecision(
+                should_rebalance=False, reason="same_month",
+                days_since_last=days_elapsed, gate_days=None,
+            )
+        if timestamp.day < self._config.rebalance_day:
+            return RebalanceDecision(
+                should_rebalance=False, reason="before_rebalance_day",
+                days_since_last=days_elapsed, gate_days=None,
+            )
+        return RebalanceDecision(
+            should_rebalance=True, reason="monthly_gate",
+            days_since_last=days_elapsed, gate_days=None,
+        )
 
     def generate_signals(
         self,

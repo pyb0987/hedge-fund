@@ -13,7 +13,7 @@ import pandas as pd
 from hedgefund.config.schemas import SectorMomentumConfig
 from hedgefund.core.enums import Exchange, SignalDirection
 from hedgefund.core.models import Signal
-from hedgefund.strategies.base import BaseStrategy
+from hedgefund.strategies.base import BaseStrategy, RebalanceDecision
 
 
 class SectorMomentumStrategy(BaseStrategy):
@@ -51,6 +51,23 @@ class SectorMomentumStrategy(BaseStrategy):
             return True
         days_elapsed = (timestamp - self._last_rebalance_date).days
         return days_elapsed >= self._config.holding_days
+
+    def get_rebalance_decision(self, timestamp: datetime) -> RebalanceDecision:
+        if self._last_rebalance_date is None:
+            return RebalanceDecision(
+                should_rebalance=True, reason="first_run",
+                days_since_last=None, gate_days=self._config.holding_days,
+            )
+        days_elapsed = (timestamp - self._last_rebalance_date).days
+        if days_elapsed >= self._config.holding_days:
+            return RebalanceDecision(
+                should_rebalance=True, reason="holding_period_met",
+                days_since_last=days_elapsed, gate_days=self._config.holding_days,
+            )
+        return RebalanceDecision(
+            should_rebalance=False, reason="too_early",
+            days_since_last=days_elapsed, gate_days=self._config.holding_days,
+        )
 
     def generate_signals(
         self,
