@@ -77,6 +77,7 @@ def _create_paper_executors(
         + allocation.dual_momentum * 0.5
         + allocation.market_hedge
         + allocation.treasury_park
+        + allocation.sector_momentum
     )
 
     upbit_capital = capital * upbit_share

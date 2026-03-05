@@ -43,6 +43,7 @@ class AllocationConfig(BaseModel):
     dual_momentum: float = Field(default=0.15, ge=0.0, le=1.0)
     market_hedge: float = Field(default=0.0, ge=0.0, le=1.0)
     treasury_park: float = Field(default=0.45, ge=0.0, le=1.0)
+    sector_momentum: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def allocations_sum_at_most_one(self) -> "AllocationConfig":
@@ -52,6 +53,7 @@ class AllocationConfig(BaseModel):
             + self.dual_momentum
             + self.market_hedge
             + self.treasury_park
+            + self.sector_momentum
         )
         if total > 1.01:
             msg = f"Allocations must sum to ≤ 1.0, got {total:.3f}"
@@ -207,6 +209,27 @@ class DualMomentumConfig(BaseModel):
             msg = f"Defensive weights must sum to 1.0, got {total:.3f}"
             raise ValueError(msg)
         return v
+
+
+class SectorMomentumConfig(BaseModel):
+    """Strategy: Sector ETF Momentum parameters."""
+
+    name: str = "sector_momentum"
+    exchange: str = "alpaca"
+    market: str = "US"
+    rebalance_frequency: RebalanceFrequency = RebalanceFrequency.WEEKLY
+
+    lookback_days: int = Field(default=20, ge=5, le=120)
+    holding_days: int = Field(default=14, ge=7, le=60)
+    top_n: int = Field(default=3, ge=1, le=5)
+
+    universe: list[str] = Field(default=[
+        "XLK", "XLF", "XLE", "XLV", "XLI",
+        "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB",
+    ])
+
+    costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.0005)
+    validation: ValidationConfig = ValidationConfig()
 
 
 class TreasuryParkConfig(BaseModel):

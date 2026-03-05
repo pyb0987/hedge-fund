@@ -14,6 +14,7 @@ from hedgefund.config.schemas import (
     EtfMeanReversionConfig,
     GlobalSettings,
     MarketHedgeConfig,
+    SectorMomentumConfig,
     TreasuryParkConfig,
 )
 from hedgefund.core.exceptions import ConfigError, ConfigFileNotFoundError
@@ -27,6 +28,7 @@ STRATEGY_CONFIG_MAP: dict[str, type[BaseModel]] = {
     "dual_momentum": DualMomentumConfig,
     "market_hedge": MarketHedgeConfig,
     "treasury_park": TreasuryParkConfig,
+    "sector_momentum": SectorMomentumConfig,
 }
 
 DEFAULT_CONFIG_DIR = Path("config")

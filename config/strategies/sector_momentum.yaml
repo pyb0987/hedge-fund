@@ -1,0 +1,28 @@
+# Sector ETF Momentum: Top N sector ETFs by momentum
+# CONDITIONAL GO — allocation 0% until validated (optimize → paper trade 3mo)
+name: sector_momentum
+exchange: alpaca
+market: US
+rebalance_frequency: weekly
+
+parameters:
+  lookback_days: 20       # 모멘텀 측정 기간
+  holding_days: 14        # 리밸런싱 간격 (격주)
+  top_n: 3                # 상위 N개 섹터 매수
+
+universe:
+  - XLK   # Technology
+  - XLF   # Financials
+  - XLE   # Energy
+  - XLV   # Health Care
+  - XLI   # Industrials
+  - XLC   # Communication Services
+  - XLY   # Consumer Discretionary
+  - XLP   # Consumer Staples
+  - XLU   # Utilities
+  - XLRE  # Real Estate
+  - XLB   # Materials
+
+costs:
+  commission_rate: 0.0
+  slippage_rate: 0.0005   # SPDR sector ETFs are highly liquid

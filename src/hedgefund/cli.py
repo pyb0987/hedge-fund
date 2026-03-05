@@ -421,10 +421,12 @@ def optimize(
         CryptoMomentumConfig,
         DualMomentumConfig,
         EtfMeanReversionConfig,
+        SectorMomentumConfig,
     )
     from hedgefund.strategies.crypto_momentum import CryptoMomentumStrategy
     from hedgefund.strategies.dual_momentum import DualMomentumStrategy
     from hedgefund.strategies.etf_mean_reversion import EtfMeanReversionStrategy
+    from hedgefund.strategies.sector_momentum import SectorMomentumStrategy
 
     # Strategy-specific grids and factories
     GRIDS: dict[str, dict] = {
@@ -455,6 +457,16 @@ def optimize(
             },
             "symbols": ["KRW-BTC", "SPY", "TLT", "GLD", "BIL"],
             "cost_config": BacktestConfig(commission_rate=0.00125, slippage_rate=0.001),
+        },
+        "sector_momentum": {
+            "factory": lambda p: SectorMomentumStrategy(SectorMomentumConfig(**p)),
+            "grid": {
+                "lookback_days": [10, 20, 40, 60],
+                "top_n": [2, 3, 4],
+                "holding_days": [14, 21, 30],
+            },
+            "symbols": ["XLK", "XLF", "XLE", "XLV", "XLI", "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB"],
+            "cost_config": BacktestConfig(commission_rate=0.0, slippage_rate=0.0005),
         },
     }
 
