@@ -71,7 +71,12 @@ class EtfMeanReversionStrategy(BaseStrategy):
                     direction=SignalDirection.LONG,
                     strength=strength,
                     timestamp=timestamp,
-                    metadata={"z_score": z},
+                    metadata={
+                        "z_score": z,
+                        "z_entry": self._config.z_entry_threshold,
+                        "z_exit": self._config.z_exit_threshold,
+                        "lookback_days": float(self._config.lookback_days),
+                    },
                 ))
             elif z >= self._config.z_exit_threshold:
                 # Overbought — close position
@@ -82,7 +87,12 @@ class EtfMeanReversionStrategy(BaseStrategy):
                     direction=SignalDirection.FLAT,
                     strength=0.0,
                     timestamp=timestamp,
-                    metadata={"z_score": z},
+                    metadata={
+                        "z_score": z,
+                        "z_entry": self._config.z_entry_threshold,
+                        "z_exit": self._config.z_exit_threshold,
+                        "lookback_days": float(self._config.lookback_days),
+                    },
                 ))
             else:
                 # Neutral zone — no strong signal
@@ -93,7 +103,12 @@ class EtfMeanReversionStrategy(BaseStrategy):
                     direction=SignalDirection.FLAT,
                     strength=0.0,
                     timestamp=timestamp,
-                    metadata={"z_score": z},
+                    metadata={
+                        "z_score": z,
+                        "z_entry": self._config.z_entry_threshold,
+                        "z_exit": self._config.z_exit_threshold,
+                        "lookback_days": float(self._config.lookback_days),
+                    },
                 ))
 
         return signals

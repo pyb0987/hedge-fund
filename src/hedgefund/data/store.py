@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS signals (
 )
 """
 
+_RISK_EVENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS risk_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    symbol TEXT,
+    strategy_name TEXT,
+    rule_name TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    current_value REAL NOT NULL,
+    limit_value REAL NOT NULL,
+    message TEXT NOT NULL
+)
+"""
+
 
 class DataStore:
     """SQLite-backed persistent data store."""
@@ -98,6 +113,7 @@ class DataStore:
             conn.execute(_TRADES_TABLE)
             conn.execute(_SNAPSHOTS_TABLE)
             conn.execute(_SIGNALS_TABLE)
+            conn.execute(_RISK_EVENTS_TABLE)
 
     def save_ohlcv(
         self,
@@ -277,6 +293,40 @@ class DataStore:
         with self._connection() as conn:
             df = pd.read_sql_query(
                 "SELECT * FROM signals ORDER BY timestamp ASC",
+                conn,
+            )
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+        return df
+
+    def save_risk_event(
+        self,
+        timestamp: datetime,
+        event_type: str,
+        rule_name: str,
+        passed: bool,
+        current_value: float,
+        limit_value: float,
+        message: str,
+        symbol: str | None = None,
+        strategy_name: str | None = None,
+    ) -> None:
+        """Save a risk check event (pass or fail)."""
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO risk_events "
+                "(timestamp, event_type, symbol, strategy_name, rule_name, "
+                "passed, current_value, limit_value, message) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(timestamp), event_type, symbol, strategy_name,
+                 rule_name, int(passed), current_value, limit_value, message),
+            )
+
+    def load_risk_events(self) -> pd.DataFrame:
+        """Load all risk events."""
+        with self._connection() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM risk_events ORDER BY timestamp ASC",
                 conn,
             )
         if not df.empty:

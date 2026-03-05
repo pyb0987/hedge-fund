@@ -98,7 +98,7 @@ class TestFormatDailyDigestHtml:
             performance=PerformanceReport(
                 1.2, 1.5, 0.08, 1.8, 0.15, 0.55, 0.10, 50, False,
             ),
-            risk_compliance=RiskComplianceReport(0.08, 3),
+            risk_compliance=RiskComplianceReport(0.08, 3, 0, 0),
             validation=ValidationResult(True, True, True, True, True),
             generated_at=datetime(2024, 6, 1),
             data_start=datetime(2024, 3, 1),
@@ -127,7 +127,7 @@ class TestFormatDailyDigestHtml:
             performance=PerformanceReport(
                 0.3, 0.4, 0.20, 0.9, 0.05, 0.40, -0.02, 8, True,
             ),
-            risk_compliance=RiskComplianceReport(0.20, 5),
+            risk_compliance=RiskComplianceReport(0.20, 5, 3, 1),
             validation=ValidationResult(False, False, False, False, False),
             generated_at=datetime(2024, 6, 1),
             data_start=None,

@@ -117,7 +117,7 @@ class DualMomentumStrategy(BaseStrategy):
                     direction=direction,
                     strength=strength,
                     timestamp=timestamp,
-                    metadata={"momentum": momenta[symbol], "regime": "offensive"},
+                    metadata={"momentum": momenta[symbol], "regime": "offensive", "lookback_days": float(self._config.lookback_days)},
                 ))
             signals.append(Signal(
                 strategy_name=self.name,
@@ -126,7 +126,7 @@ class DualMomentumStrategy(BaseStrategy):
                 direction=SignalDirection.FLAT,
                 strength=0.0,
                 timestamp=timestamp,
-                metadata={"regime": "offensive"},
+                metadata={"regime": "offensive", "lookback_days": float(self._config.lookback_days)},
             ))
 
         elif len(positive_assets) == 1:
@@ -143,7 +143,7 @@ class DualMomentumStrategy(BaseStrategy):
                     direction=direction,
                     strength=strength,
                     timestamp=timestamp,
-                    metadata={"momentum": momenta[symbol], "regime": "mixed"},
+                    metadata={"momentum": momenta[symbol], "regime": "mixed", "lookback_days": float(self._config.lookback_days)},
                 ))
             signals.append(Signal(
                 strategy_name=self.name,
@@ -152,7 +152,7 @@ class DualMomentumStrategy(BaseStrategy):
                 direction=SignalDirection.FLAT,
                 strength=0.0,
                 timestamp=timestamp,
-                metadata={"regime": "mixed"},
+                metadata={"regime": "mixed", "lookback_days": float(self._config.lookback_days)},
             ))
 
         else:
@@ -166,7 +166,7 @@ class DualMomentumStrategy(BaseStrategy):
                     direction=SignalDirection.FLAT,
                     strength=0.0,
                     timestamp=timestamp,
-                    metadata={"momentum": momenta[symbol], "regime": "defensive"},
+                    metadata={"momentum": momenta[symbol], "regime": "defensive", "lookback_days": float(self._config.lookback_days)},
                 ))
             signals.append(Signal(
                 strategy_name=self.name,
@@ -175,7 +175,7 @@ class DualMomentumStrategy(BaseStrategy):
                 direction=SignalDirection.LONG,
                 strength=1.0,
                 timestamp=timestamp,
-                metadata={"regime": "defensive"},
+                metadata={"regime": "defensive", "lookback_days": float(self._config.lookback_days)},
             ))
 
         # Mark rebalance date for monthly gate

@@ -111,7 +111,13 @@ class CryptoMomentumStrategy(BaseStrategy):
                     direction=SignalDirection.LONG,
                     strength=strength,
                     timestamp=timestamp,
-                    metadata={"momentum_score": score, "rank": float(i + 1)},
+                    metadata={
+                        "momentum_score": score,
+                        "rank": float(i + 1),
+                        "top_n": float(top_n),
+                        "lookback_days": float(self._config.lookback_days),
+                        "threshold": 0.0,  # momentum > 0
+                    },
                 ))
             else:
                 # Flat — sell or stay out
@@ -122,7 +128,13 @@ class CryptoMomentumStrategy(BaseStrategy):
                     direction=SignalDirection.FLAT,
                     strength=0.0,
                     timestamp=timestamp,
-                    metadata={"momentum_score": score, "rank": float(i + 1)},
+                    metadata={
+                        "momentum_score": score,
+                        "rank": float(i + 1),
+                        "top_n": float(top_n),
+                        "lookback_days": float(self._config.lookback_days),
+                        "threshold": 0.0,
+                    },
                 ))
 
         # Mark rebalance date for holding_days gate

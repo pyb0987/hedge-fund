@@ -145,3 +145,48 @@ class TestDataStore:
         assert len(trades) == 3
         # Should be ordered by timestamp
         assert trades.iloc[0]["timestamp"] < trades.iloc[2]["timestamp"]
+
+    def test_save_trade_with_pnl(self, store: DataStore) -> None:
+        store.save_trade(
+            symbol="KRW-BTC", exchange="upbit", side="sell",
+            quantity=0.01, price=51_000_000,
+            commission=1275.0, slippage=765.0,
+            strategy_name="crypto_momentum",
+            timestamp=datetime(2024, 3, 15),
+            pnl=8960.0,
+        )
+        trades = store.load_trades()
+        assert len(trades) == 1
+        assert trades.iloc[0]["pnl"] == 8960.0
+
+    def test_save_and_load_risk_event(self, store: DataStore) -> None:
+        store.save_risk_event(
+            timestamp=datetime(2024, 3, 1),
+            event_type="pre_trade",
+            rule_name="single_position",
+            passed=False,
+            current_value=0.18,
+            limit_value=0.15,
+            message="Position 18.0% > 15.0% limit",
+            symbol="KRW-BTC",
+            strategy_name="crypto_momentum",
+        )
+        events = store.load_risk_events()
+        assert len(events) == 1
+        assert events.iloc[0]["rule_name"] == "single_position"
+        assert events.iloc[0]["passed"] == 0
+
+    def test_risk_events_ordering(self, store: DataStore) -> None:
+        for ts in [datetime(2024, 3, 1), datetime(2024, 3, 2), datetime(2024, 3, 3)]:
+            store.save_risk_event(
+                timestamp=ts,
+                event_type="drawdown_check",
+                rule_name="portfolio_drawdown",
+                passed=True,
+                current_value=0.03,
+                limit_value=0.20,
+                message="DD 3.0%",
+            )
+        events = store.load_risk_events()
+        assert len(events) == 3
+        assert events.iloc[0]["timestamp"] < events.iloc[2]["timestamp"]

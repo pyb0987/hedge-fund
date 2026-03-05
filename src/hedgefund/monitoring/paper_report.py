@@ -72,6 +72,8 @@ class RiskComplianceReport:
 
     max_observed_drawdown: float
     drawdown_activations: int  # cycles where drawdown > 5%
+    risk_rejections: int  # orders rejected by risk checks
+    cycles_blocked: int  # entire cycles blocked by risk system
 
 
 @dataclass(frozen=True)
@@ -197,12 +199,17 @@ def analyze_performance(
     )
 
 
-def analyze_risk_compliance(snapshots_df: pd.DataFrame) -> RiskComplianceReport:
-    """Analyze risk system compliance from snapshot drawdown data."""
+def analyze_risk_compliance(
+    snapshots_df: pd.DataFrame,
+    risk_events_df: pd.DataFrame | None = None,
+) -> RiskComplianceReport:
+    """Analyze risk system compliance from snapshot and risk event data."""
     if snapshots_df.empty:
         return RiskComplianceReport(
             max_observed_drawdown=0.0,
             drawdown_activations=0,
+            risk_rejections=0,
+            cycles_blocked=0,
         )
 
     drawdowns = snapshots_df["drawdown"].values.astype(np.float64)
@@ -210,9 +217,26 @@ def analyze_risk_compliance(snapshots_df: pd.DataFrame) -> RiskComplianceReport:
     # Progressive drawdown activates at 5%
     activations = int(np.sum(drawdowns > 0.05))
 
+    # Count risk rejections and blocked cycles from risk_events table
+    risk_rejections = 0
+    cycles_blocked = 0
+    if risk_events_df is not None and not risk_events_df.empty:
+        # Count orders rejected by risk system or execution failures
+        is_rejection = (
+            (risk_events_df["event_type"] == "execution_failed")
+            | ((risk_events_df["passed"] == 0)
+               & (risk_events_df["event_type"].isin(["pre_trade", "order_rejected"])))
+        )
+        risk_rejections = int(is_rejection.sum())
+        cycles_blocked = int(
+            (risk_events_df["event_type"] == "cycle_blocked").sum()
+        )
+
     return RiskComplianceReport(
         max_observed_drawdown=max_dd,
         drawdown_activations=activations,
+        risk_rejections=risk_rejections,
+        cycles_blocked=cycles_blocked,
     )
 
 
@@ -245,11 +269,12 @@ def generate_report(
     signals_df = store.load_signals()
     trades_df = store.load_trades()
     snapshots_df = store.load_snapshots()
+    risk_events_df = store.load_risk_events()
 
     signal_fidelity = analyze_signal_fidelity(signals_df, trades_df)
     cost = analyze_costs(trades_df)
     performance = analyze_performance(snapshots_df, thresholds)
-    risk_compliance = analyze_risk_compliance(snapshots_df)
+    risk_compliance = analyze_risk_compliance(snapshots_df, risk_events_df)
     validation_result = validate(performance, thresholds)
 
     # Determine data range
@@ -321,6 +346,8 @@ def format_report(report: PaperReport) -> str:
         "Risk Compliance:",
         f"  Max Observed DD:    {risk.max_observed_drawdown:>10.2%}",
         f"  DD Activations:     {risk.drawdown_activations:>10d}",
+        f"  Risk Rejections:    {risk.risk_rejections:>10d}",
+        f"  Cycles Blocked:     {risk.cycles_blocked:>10d}",
         "",
         "Go/No-Go Validation:",
         f"  [{'PASS' if val.sharpe_pass else 'FAIL'}] Sharpe >= 0.5",

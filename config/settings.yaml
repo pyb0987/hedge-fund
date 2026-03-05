@@ -36,6 +36,6 @@ monitoring:
   log_format: json
   health_check_interval_minutes: 30
   telegram:
-    enabled: false
-    bot_token: ""   # @BotFather에서 발급, 실제 운영시 환경변수 사용
-    chat_id: ""     # 수신할 채팅방 ID
+    enabled: true
+    bot_token: "REDACTED_TOKEN"
+    chat_id: "REDACTED_CHAT_ID"

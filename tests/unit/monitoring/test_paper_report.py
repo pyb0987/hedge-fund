@@ -127,6 +127,8 @@ class TestRiskCompliance:
         result = analyze_risk_compliance(pd.DataFrame())
         assert result.max_observed_drawdown == 0.0
         assert result.drawdown_activations == 0
+        assert result.risk_rejections == 0
+        assert result.cycles_blocked == 0
 
     def test_no_activations(self) -> None:
         df = pd.DataFrame({"drawdown": [0.01, 0.02, 0.03, 0.04]})
@@ -139,6 +141,17 @@ class TestRiskCompliance:
         result = analyze_risk_compliance(df)
         assert result.max_observed_drawdown == pytest.approx(0.12)
         assert result.drawdown_activations == 2  # 0.08 and 0.12 > 0.05
+
+    def test_with_risk_events(self) -> None:
+        snapshots = pd.DataFrame({"drawdown": [0.01, 0.08]})
+        risk_events = pd.DataFrame({
+            "event_type": ["execution_failed", "cycle_blocked", "drawdown_check"],
+            "passed": [0, 0, 1],
+            "rule_name": ["order_rejected", "max_drawdown", "portfolio_drawdown"],
+        })
+        result = analyze_risk_compliance(snapshots, risk_events)
+        assert result.risk_rejections == 1
+        assert result.cycles_blocked == 1
 
 
 # --- Validation ---
@@ -245,7 +258,7 @@ class TestFormatReport:
             performance=PerformanceReport(
                 1.2, 1.5, 0.08, 1.8, 0.15, 0.55, 0.10, 50, False,
             ),
-            risk_compliance=RiskComplianceReport(0.08, 3),
+            risk_compliance=RiskComplianceReport(0.08, 3, 0, 0),
             validation=ValidationResult(True, True, True, True, True),
             generated_at=datetime(2024, 6, 1, 12, 0),
             data_start=datetime(2024, 3, 1),
@@ -266,7 +279,7 @@ class TestFormatReport:
             performance=PerformanceReport(
                 0.3, 0.4, 0.18, 0.9, 0.05, 0.40, -0.02, 8, True,
             ),
-            risk_compliance=RiskComplianceReport(0.18, 5),
+            risk_compliance=RiskComplianceReport(0.18, 5, 2, 1),
             validation=ValidationResult(False, False, False, False, False),
             generated_at=datetime(2024, 6, 1),
             data_start=None,

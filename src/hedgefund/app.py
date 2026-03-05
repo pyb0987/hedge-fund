@@ -332,9 +332,15 @@ def _persist_cycle_data(
                 metadata=signal.metadata,
             )
 
-        # B. Save trades (for Cost Accuracy validation)
+        # B. Save trades with PnL (for Cost Accuracy + Performance validation)
+        cycle_realized_pnl = 0.0
         for execution in result.executions:
             if execution.success:
+                # Extract PnL from paper executor's trade records
+                trade_pnl = _find_trade_pnl(executors, execution)
+                if trade_pnl is not None:
+                    cycle_realized_pnl += trade_pnl
+
                 store.save_trade(
                     symbol=execution.order.symbol,
                     exchange=execution.order.exchange.value,
@@ -345,7 +351,20 @@ def _persist_cycle_data(
                     slippage=execution.slippage,
                     strategy_name=execution.order.strategy_name,
                     timestamp=result.timestamp,
-                    pnl=None,  # PnL computed from position tracking
+                    pnl=trade_pnl,
+                )
+            else:
+                # Save failed execution as risk event
+                store.save_risk_event(
+                    timestamp=result.timestamp,
+                    event_type="execution_failed",
+                    rule_name="order_rejected",
+                    passed=False,
+                    current_value=0.0,
+                    limit_value=0.0,
+                    message=execution.error_message or "Unknown execution error",
+                    symbol=execution.order.symbol,
+                    strategy_name=execution.order.strategy_name,
                 )
 
         # C. Save portfolio snapshot with real drawdown (for Performance validation)
@@ -363,10 +382,69 @@ def _persist_cycle_data(
             total_value=total_value,
             cash=total_cash,
             unrealized_pnl=total_value - total_cash,
-            realized_pnl=result.total_commission,
+            realized_pnl=cycle_realized_pnl,
             drawdown=dd_state.drawdown,
             peak_value=dd_state.peak_value,
         )
 
+        # D. Save risk events from portfolio manager cycle
+        _persist_risk_events(store, result, risk_manager, total_value)
+
     except Exception:
         logger.exception("Failed to persist cycle data")
+
+
+def _find_trade_pnl(
+    executors: dict[Exchange, PaperExecutor],
+    execution: "ExecutionResult",
+) -> float | None:
+    """Extract PnL from paper executor's trade records for a given execution."""
+    from hedgefund.core.enums import OrderSide
+
+    if execution.order.side != OrderSide.SELL:
+        return None
+
+    executor = executors.get(execution.order.exchange)
+    if executor is None:
+        return None
+
+    # Search executor's trade history for matching trade
+    for trade in reversed(executor._trades):
+        if (trade.symbol == execution.order.symbol
+                and trade.side == OrderSide.SELL
+                and trade.pnl is not None):
+            return trade.pnl
+
+    return None
+
+
+def _persist_risk_events(
+    store: DataStore,
+    result: "CycleResult",
+    risk_manager: RiskManager,
+    total_value: float,
+) -> None:
+    """Save risk system state as events for audit trail."""
+    # Save drawdown state as risk event
+    dd_state = risk_manager.get_drawdown_state(total_value)
+    store.save_risk_event(
+        timestamp=result.timestamp,
+        event_type="drawdown_check",
+        rule_name="portfolio_drawdown",
+        passed=not dd_state.is_max_breached,
+        current_value=dd_state.drawdown,
+        limit_value=risk_manager.config.max_portfolio_drawdown,
+        message=f"DD {dd_state.drawdown:.1%}, multiplier={dd_state.position_multiplier:.2f}",
+    )
+
+    # If risk blocked the entire cycle, record that
+    if result.risk_blocked:
+        store.save_risk_event(
+            timestamp=result.timestamp,
+            event_type="cycle_blocked",
+            rule_name="max_drawdown",
+            passed=False,
+            current_value=dd_state.drawdown,
+            limit_value=risk_manager.config.max_portfolio_drawdown,
+            message=result.risk_reason or "Max drawdown breached",
+        )

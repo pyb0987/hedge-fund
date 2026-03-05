@@ -180,6 +180,12 @@ class PortfolioManager:
                     "Risk check failed for %s %s: %s",
                     order.symbol, order.side.value, report.blocked_reason,
                 )
+                # Record rejected execution for audit trail
+                all_executions.append(ExecutionResult(
+                    order=order,
+                    success=False,
+                    error_message=f"Risk rejected: {report.blocked_reason}",
+                ))
                 continue
 
             # Step 7: Execute

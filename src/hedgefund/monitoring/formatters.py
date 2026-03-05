@@ -112,6 +112,8 @@ def format_daily_digest_html(report: PaperReport) -> str:
         "<b>4. Risk Compliance</b>",
         f"  Max Observed DD: {risk.max_observed_drawdown:.1%}",
         f"  DD Activations: {risk.drawdown_activations}",
+        f"  Risk Rejections: {risk.risk_rejections}",
+        f"  Cycles Blocked: {risk.cycles_blocked}",
         "",
         f"<b>Overall: {overall}</b>",
     ])
