@@ -11,12 +11,11 @@ Reads signals, trades, and snapshots from DataStore and computes:
 8. Validation: Go/No-Go thresholds
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
 
 from hedgefund.core import risk_metrics
 from hedgefund.data.store import DataStore

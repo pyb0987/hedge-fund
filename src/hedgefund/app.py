@@ -9,18 +9,13 @@ from datetime import datetime
 from pathlib import Path
 
 from hedgefund.config.loader import load_all_strategy_configs, load_global_settings
-from hedgefund.config.schemas import (
-    CryptoMomentumConfig,
-    DualMomentumConfig,
-    EtfMeanReversionConfig,
-    GlobalSettings,
-)
+from hedgefund.config.schemas import AllocationConfig, GlobalSettings
 from hedgefund.core.enums import Exchange
 from hedgefund.data.collector import CollectionResult, DataCollector
 from hedgefund.data.protocols import DataProvider
 from hedgefund.data.store import DataStore
 from hedgefund.execution.executors.paper_executor import PaperExecutor
-from hedgefund.execution.protocols import Executor
+from hedgefund.execution.protocols import ExecutionResult
 from hedgefund.execution.state import (
     load_state,
     load_strategy_state,
@@ -448,7 +443,7 @@ def _persist_cycle_data(
 
 def _find_trade_pnl(
     executors: dict[Exchange, PaperExecutor],
-    execution: "ExecutionResult",
+    execution: ExecutionResult,
 ) -> float | None:
     """Extract PnL from paper executor's trade records for a given execution."""
     from hedgefund.core.enums import OrderSide
@@ -461,7 +456,7 @@ def _find_trade_pnl(
         return None
 
     # Search executor's trade history for matching trade
-    for trade in reversed(executor._trades):
+    for trade in reversed(executor.trades):
         if (trade.symbol == execution.order.symbol
                 and trade.side == OrderSide.SELL
                 and trade.pnl is not None):
@@ -472,7 +467,7 @@ def _find_trade_pnl(
 
 def _persist_risk_events(
     store: DataStore,
-    result: "CycleResult",
+    result: CycleResult,
     risk_manager: RiskManager,
     total_value: float,
 ) -> None:
@@ -517,7 +512,7 @@ def _persist_position_snapshots(
             symbol_strategy[sym] = name
 
     for executor in executors.values():
-        for sym, pos in executor._positions.items():
+        for sym, pos in executor.positions.items():
             market_price = executor.get_current_price(sym)
             market_value = pos.quantity * market_price
             unrealized_pnl = (market_price - pos.avg_entry_price) * pos.quantity
@@ -537,9 +532,9 @@ def _persist_position_snapshots(
 
 def _persist_strategy_decisions(
     store: DataStore,
-    result: "CycleResult",
+    result: CycleResult,
     strategies: dict[str, Strategy],
-    allocation: "AllocationConfig",
+    allocation: AllocationConfig,
     rebalance_decisions: dict[str, RebalanceDecision],
     dd_multiplier: float,
     total_value: float,
@@ -578,7 +573,7 @@ def _persist_strategy_decisions(
 
 def _persist_ohlcv(store: DataStore, collection: CollectionResult) -> None:
     """Save collected OHLCV data for post-hoc price verification."""
-    for strategy_name, strategy_data in collection.data.items():
+    for _strategy_name, strategy_data in collection.data.items():
         for symbol, df in strategy_data.items():
             if df.empty:
                 continue

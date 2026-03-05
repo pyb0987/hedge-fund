@@ -52,6 +52,11 @@ class PaperExecutor:
         return self._cash
 
     @property
+    def positions(self) -> dict[str, "PaperPosition"]:
+        """Return defensive copy of current positions."""
+        return dict(self._positions)
+
+    @property
     def trades(self) -> list[TradeRecord]:
         return list(self._trades)
 

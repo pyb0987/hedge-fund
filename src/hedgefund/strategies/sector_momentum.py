@@ -53,20 +53,8 @@ class SectorMomentumStrategy(BaseStrategy):
         return days_elapsed >= self._config.holding_days
 
     def get_rebalance_decision(self, timestamp: datetime) -> RebalanceDecision:
-        if self._last_rebalance_date is None:
-            return RebalanceDecision(
-                should_rebalance=True, reason="first_run",
-                days_since_last=None, gate_days=self._config.holding_days,
-            )
-        days_elapsed = (timestamp - self._last_rebalance_date).days
-        if days_elapsed >= self._config.holding_days:
-            return RebalanceDecision(
-                should_rebalance=True, reason="holding_period_met",
-                days_since_last=days_elapsed, gate_days=self._config.holding_days,
-            )
-        return RebalanceDecision(
-            should_rebalance=False, reason="too_early",
-            days_since_last=days_elapsed, gate_days=self._config.holding_days,
+        return self._holding_day_rebalance_decision(
+            timestamp, self._last_rebalance_date, self._config.holding_days,
         )
 
     def generate_signals(

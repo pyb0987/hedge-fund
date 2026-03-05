@@ -9,7 +9,6 @@ from typing import Iterator
 
 import pandas as pd
 
-from hedgefund.core.exceptions import DataError
 
 _OHLCV_TABLE = """
 CREATE TABLE IF NOT EXISTS ohlcv (
@@ -196,7 +195,7 @@ class DataStore:
             "SELECT timestamp, open, high, low, close, volume FROM ohlcv "
             "WHERE symbol = ? AND exchange = ? AND interval = ?"
         )
-        params: list = [symbol, exchange, interval]
+        params: list[object] = [symbol, exchange, interval]
 
         if start is not None:
             query += " AND timestamp >= ?"
@@ -306,7 +305,7 @@ class DataStore:
         exchange: str,
         direction: str,
         strength: float,
-        metadata: dict | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         """Save a single signal record."""
         meta_str = json.dumps(metadata) if metadata else None

@@ -92,6 +92,29 @@ class BaseStrategy(ABC):
         """
         return RebalanceDecision(should_rebalance=True, reason="no_gate")
 
+    def _holding_day_rebalance_decision(
+        self,
+        timestamp: datetime,
+        last_rebalance_date: datetime | None,
+        holding_days: int,
+    ) -> RebalanceDecision:
+        """Shared logic for holding-period-based rebalancing gate."""
+        if last_rebalance_date is None:
+            return RebalanceDecision(
+                should_rebalance=True, reason="first_run",
+                days_since_last=None, gate_days=holding_days,
+            )
+        days_elapsed = (timestamp - last_rebalance_date).days
+        if days_elapsed >= holding_days:
+            return RebalanceDecision(
+                should_rebalance=True, reason="holding_period_met",
+                days_since_last=days_elapsed, gate_days=holding_days,
+            )
+        return RebalanceDecision(
+            should_rebalance=False, reason="too_early",
+            days_since_last=days_elapsed, gate_days=holding_days,
+        )
+
     @staticmethod
     def compute_returns(prices: pd.Series) -> pd.Series:
         """Compute simple returns from price series."""
