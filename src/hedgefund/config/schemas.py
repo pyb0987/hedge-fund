@@ -75,12 +75,21 @@ class DataConfig(BaseModel):
 # --- Monitoring ---
 
 
+class TelegramConfig(BaseModel):
+    """Telegram notification configuration."""
+
+    enabled: bool = Field(default=False)
+    bot_token: str = Field(default="")
+    chat_id: str = Field(default="")
+
+
 class MonitoringConfig(BaseModel):
     """Monitoring configuration."""
 
     log_level: str = Field(default="INFO")
     log_format: str = Field(default="json")
     health_check_interval_minutes: int = Field(default=30, ge=1)
+    telegram: TelegramConfig = TelegramConfig()
 
 
 # --- Portfolio ---

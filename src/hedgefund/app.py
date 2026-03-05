@@ -214,6 +214,9 @@ def run_once(
     # 9. Log results
     _log_cycle_result(cycle_result, executors)
 
+    # 9b. Send Telegram notification
+    _send_telegram_notification(settings, cycle_result, collection)
+
     # 10. Persist everything
     if not dry_run:
         save_state(executors[Exchange.UPBIT], UPBIT_STATE)
@@ -229,6 +232,47 @@ def run_once(
         portfolio_value=cycle_result.portfolio_value,
         timestamp=now,
     )
+
+
+def _send_telegram_notification(
+    settings: GlobalSettings,
+    result: CycleResult,
+    collection: CollectionResult,
+) -> None:
+    """Send cycle summary via Telegram (no-op if disabled)."""
+    tg_config = settings.monitoring.telegram
+    if not tg_config.enabled or not tg_config.bot_token:
+        return
+
+    try:
+        from hedgefund.monitoring.telegram import TelegramConfig, TelegramNotifier
+
+        notifier = TelegramNotifier(TelegramConfig(
+            bot_token=tg_config.bot_token,
+            chat_id=tg_config.chat_id,
+            enabled=True,
+        ))
+        notifier.notify_cycle(
+            timestamp=result.timestamp,
+            signals=len(result.signals),
+            trades=result.num_trades,
+            commission=result.total_commission,
+            portfolio_value=result.portfolio_value,
+            risk_blocked=result.risk_blocked,
+            risk_reason=result.risk_reason,
+            errors=tuple(collection.errors),
+        )
+
+        if result.risk_blocked:
+            notifier.notify_risk_alert(
+                reason=result.risk_reason or "Unknown",
+                drawdown=0.0,
+                timestamp=result.timestamp,
+            )
+
+        notifier.close()
+    except Exception:
+        logger.exception("Telegram notification failed — continuing")
 
 
 def _symbol_exchange(symbol: str) -> Exchange:

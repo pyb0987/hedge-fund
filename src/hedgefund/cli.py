@@ -4,6 +4,7 @@ Usage:
     uv run python -m hedgefund paper-run
     uv run python -m hedgefund paper-run --dry-run
     uv run python -m hedgefund paper-status
+    uv run python -m hedgefund paper-report
 """
 
 import logging
@@ -135,3 +136,35 @@ def paper_reset(
             typer.echo(f"Deleted: {path}")
 
     typer.echo("Paper trading state reset.")
+
+
+@app.command()
+def paper_report(
+    config_dir: Path = typer.Option(
+        Path("config"), help="Config directory path",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable debug logging",
+    ),
+) -> None:
+    """Generate paper trading validation report (Go/No-Go analysis)."""
+    _setup_logging(verbose)
+
+    from hedgefund.config.loader import load_global_settings
+    from hedgefund.data.store import DataStore
+    from hedgefund.monitoring.paper_report import (
+        ReportThresholds,
+        format_report,
+        generate_report,
+    )
+
+    try:
+        settings = load_global_settings(config_dir)
+        store = DataStore(settings.data.sqlite_path)
+
+        report = generate_report(store, ReportThresholds())
+        typer.echo(format_report(report))
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
