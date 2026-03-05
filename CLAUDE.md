@@ -43,6 +43,7 @@
 | dual_momentum | 15% | Both | Long + 방어 바스켓 | 교차자산 모멘텀 |
 | market_hedge | 0% (NO-GO) | Alpaca | 비활성 | SPY+SH 충돌 |
 | treasury_park | 45% | Alpaca | BIL 상시 홀딩 | 유휴 현금 → 무위험 수익 |
+| sector_momentum | 0% (조건부) | Alpaca | Long-only 섹터 ETF | optimize로 검증 후 활성화 |
 | 현금 버퍼 | 10% | - | - | 긴급 리밸런싱 여유 |
 
 ## Risk Limits
@@ -52,7 +53,7 @@
 ## Key Paths
 - Config: `config/settings.yaml`, `config/strategies/*.yaml`
 - Core: `src/hedgefund/core/` (models, enums, exceptions, risk_metrics, kelly)
-- Strategies: `src/hedgefund/strategies/` (base, crypto_momentum, etf_mean_reversion, dual_momentum, market_hedge, treasury_park, registry)
+- Strategies: `src/hedgefund/strategies/` (base, crypto_momentum, etf_mean_reversion, dual_momentum, market_hedge, treasury_park, sector_momentum, registry)
 - Backtest: `src/hedgefund/backtest/` (engine, walk_forward, metrics, deflated_sharpe)
 - Risk: `src/hedgefund/risk/` (manager, limits, drawdown, position_sizer)
 - Portfolio: `src/hedgefund/portfolio/` (manager, allocator, correlation, rebalancer)
