@@ -219,3 +219,107 @@ class TestAccountState:
         assert result.commission > 0  # Upbit charges 0.25%
         assert result.slippage > 0  # Upbit slippage 0.15%
         assert result.total_cost > 0
+
+
+class TestStrategyIsolation:
+    """Tests for strategy-level position isolation."""
+
+    def _make_strategy_order(
+        self,
+        strategy_name: str,
+        symbol: str = "KRW-BTC",
+        side: OrderSide = OrderSide.BUY,
+        quantity: float = 0.001,
+    ) -> Order:
+        return Order(
+            strategy_name=strategy_name,
+            symbol=symbol,
+            exchange=Exchange.UPBIT,
+            side=side,
+            quantity=quantity,
+            timestamp=datetime(2024, 6, 1),
+        )
+
+    def test_two_strategies_same_symbol_isolated(self) -> None:
+        """Two strategies can hold the same symbol independently."""
+        executor = PaperExecutor(
+            Exchange.UPBIT,
+            initial_cash=10_000_000,
+            price_feed={"KRW-BTC": 50_000_000},
+        )
+
+        executor.submit_order(self._make_strategy_order("strategy_a", quantity=0.001))
+        executor.submit_order(self._make_strategy_order("strategy_b", quantity=0.002))
+
+        assert executor.get_strategy_position_quantity("strategy_a", "KRW-BTC") == pytest.approx(0.001)
+        assert executor.get_strategy_position_quantity("strategy_b", "KRW-BTC") == pytest.approx(0.002)
+        assert executor.get_position_quantity("KRW-BTC") == pytest.approx(0.003)
+        assert executor.get_account_info().positions["KRW-BTC"] == pytest.approx(0.003)
+
+    def test_sell_only_affects_owning_strategy(self) -> None:
+        """Selling from one strategy does NOT affect another strategy's position."""
+        executor = PaperExecutor(
+            Exchange.UPBIT,
+            initial_cash=10_000_000,
+            price_feed={"KRW-BTC": 50_000_000},
+        )
+
+        executor.submit_order(self._make_strategy_order("strategy_a", quantity=0.001))
+        executor.submit_order(self._make_strategy_order("strategy_b", quantity=0.002))
+
+        executor.submit_order(self._make_strategy_order(
+            "strategy_a", side=OrderSide.SELL, quantity=0.001,
+        ))
+
+        assert executor.get_strategy_position_quantity("strategy_a", "KRW-BTC") == pytest.approx(0.0)
+        assert executor.get_strategy_position_quantity("strategy_b", "KRW-BTC") == pytest.approx(0.002)
+        assert executor.get_position_quantity("KRW-BTC") == pytest.approx(0.002)
+
+    def test_sell_rejected_for_wrong_strategy(self) -> None:
+        """Cannot sell a position owned by a different strategy."""
+        executor = PaperExecutor(
+            Exchange.UPBIT,
+            initial_cash=10_000_000,
+            price_feed={"KRW-BTC": 50_000_000},
+        )
+
+        executor.submit_order(self._make_strategy_order("strategy_a", quantity=0.001))
+
+        result = executor.submit_order(self._make_strategy_order(
+            "strategy_b", side=OrderSide.SELL, quantity=0.001,
+        ))
+
+        assert not result.success
+        assert result.order.status == OrderStatus.REJECTED
+        assert executor.get_strategy_position_quantity("strategy_a", "KRW-BTC") == pytest.approx(0.001)
+
+    def test_positions_property_has_composite_keys(self) -> None:
+        """Positions property returns (strategy_name, symbol) keyed dict."""
+        executor = PaperExecutor(
+            Exchange.UPBIT,
+            initial_cash=10_000_000,
+            price_feed={"KRW-BTC": 50_000_000},
+        )
+
+        executor.submit_order(self._make_strategy_order("strategy_a", quantity=0.001))
+
+        positions = executor.positions
+        assert ("strategy_a", "KRW-BTC") in positions
+        pos = positions[("strategy_a", "KRW-BTC")]
+        assert pos.strategy_name == "strategy_a"
+        assert pos.quantity == pytest.approx(0.001)
+
+    def test_weighted_average_within_same_strategy(self) -> None:
+        """Multiple buys by the same strategy correctly average entry price."""
+        executor = PaperExecutor(
+            Exchange.UPBIT,
+            initial_cash=10_000_000,
+            price_feed={"KRW-BTC": 50_000_000},
+        )
+
+        executor.submit_order(self._make_strategy_order("strategy_a", quantity=0.001))
+
+        executor.set_prices({"KRW-BTC": 60_000_000})
+        executor.submit_order(self._make_strategy_order("strategy_a", quantity=0.001))
+
+        assert executor.get_strategy_position_quantity("strategy_a", "KRW-BTC") == pytest.approx(0.002)

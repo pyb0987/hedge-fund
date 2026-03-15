@@ -21,6 +21,7 @@ class PaperPosition:
     quantity: float
     avg_entry_price: float
     exchange: Exchange
+    strategy_name: str
 
 
 class PaperExecutor:
@@ -39,7 +40,7 @@ class PaperExecutor:
         self._exchange = exchange
         self._cash = initial_cash
         self._initial_cash = initial_cash
-        self._positions: dict[str, PaperPosition] = {}
+        self._positions: dict[tuple[str, str], PaperPosition] = {}
         self._trades: list[TradeRecord] = []
         self._price_feed: dict[str, float] = price_feed or {}
 
@@ -52,8 +53,11 @@ class PaperExecutor:
         return self._cash
 
     @property
-    def positions(self) -> dict[str, "PaperPosition"]:
-        """Return defensive copy of current positions."""
+    def positions(self) -> dict[tuple[str, str], "PaperPosition"]:
+        """Return defensive copy of current positions.
+
+        Keys are (strategy_name, symbol) tuples.
+        """
         return dict(self._positions)
 
     @property
@@ -107,10 +111,11 @@ class PaperExecutor:
                 )
 
             self._cash -= total_cost
-            self._update_position_buy(order.symbol, order.quantity, fill_price)
+            self._update_position_buy(order.strategy_name, order.symbol, order.quantity, fill_price)
 
         elif order.side == OrderSide.SELL:
-            current_pos = self._positions.get(order.symbol)
+            pos_key = (order.strategy_name, order.symbol)
+            current_pos = self._positions.get(pos_key)
             if current_pos is None or current_pos.quantity < order.quantity:
                 return ExecutionResult(
                     order=replace(order, status=OrderStatus.REJECTED),
@@ -124,7 +129,7 @@ class PaperExecutor:
 
             proceeds = fill_value - commission
             self._cash += proceeds
-            self._update_position_sell(order.symbol, order.quantity)
+            self._update_position_sell(order.strategy_name, order.symbol, order.quantity)
 
         # Record trade
         filled_order = replace(
@@ -138,7 +143,7 @@ class PaperExecutor:
         if order.side == OrderSide.SELL:
             entry_price = sell_entry_price  # type: ignore[possibly-undefined]
         else:
-            pos = self._positions.get(order.symbol)
+            pos = self._positions.get((order.strategy_name, order.symbol))
             if pos is not None:
                 entry_price = pos.avg_entry_price
 
@@ -176,14 +181,15 @@ class PaperExecutor:
 
     def get_account_info(self) -> AccountInfo:
         """Get current paper account state."""
-        positions_qty = {
-            sym: pos.quantity for sym, pos in self._positions.items()
-        }
+        # Aggregate quantities by symbol across all strategies
+        positions_qty: dict[str, float] = {}
+        for (_strat, sym), pos in self._positions.items():
+            positions_qty[sym] = positions_qty.get(sym, 0.0) + pos.quantity
 
         # Compute total value
         position_value = sum(
-            pos.quantity * self.get_current_price(sym)
-            for sym, pos in self._positions.items()
+            pos.quantity * self.get_current_price(pos.symbol)
+            for pos in self._positions.values()
         )
 
         return AccountInfo(
@@ -195,9 +201,12 @@ class PaperExecutor:
         )
 
     def get_position_quantity(self, symbol: str) -> float:
-        """Get current quantity for a symbol."""
-        pos = self._positions.get(symbol)
-        return pos.quantity if pos is not None else 0.0
+        """Get aggregate quantity for a symbol across all strategies."""
+        total = 0.0
+        for (_strat, sym), pos in self._positions.items():
+            if sym == symbol:
+                total += pos.quantity
+        return total
 
     def get_position_value(self, symbol: str) -> float:
         """Get current market value of a position."""
@@ -205,42 +214,52 @@ class PaperExecutor:
         price = self.get_current_price(symbol)
         return qty * price
 
-    def _update_position_buy(self, symbol: str, quantity: float, price: float) -> None:
+    def get_strategy_position_quantity(self, strategy_name: str, symbol: str) -> float:
+        """Get quantity for a specific strategy's position in a symbol."""
+        pos = self._positions.get((strategy_name, symbol))
+        return pos.quantity if pos is not None else 0.0
+
+    def _update_position_buy(self, strategy_name: str, symbol: str, quantity: float, price: float) -> None:
         """Update position after a buy (weighted average entry price)."""
-        existing = self._positions.get(symbol)
+        key = (strategy_name, symbol)
+        existing = self._positions.get(key)
         if existing is not None:
             total_qty = existing.quantity + quantity
             avg_price = (
                 (existing.avg_entry_price * existing.quantity + price * quantity)
                 / total_qty
             )
-            self._positions[symbol] = PaperPosition(
+            self._positions[key] = PaperPosition(
                 symbol=symbol,
                 quantity=total_qty,
                 avg_entry_price=avg_price,
                 exchange=self._exchange,
+                strategy_name=strategy_name,
             )
         else:
-            self._positions[symbol] = PaperPosition(
+            self._positions[key] = PaperPosition(
                 symbol=symbol,
                 quantity=quantity,
                 avg_entry_price=price,
                 exchange=self._exchange,
+                strategy_name=strategy_name,
             )
 
-    def _update_position_sell(self, symbol: str, quantity: float) -> None:
+    def _update_position_sell(self, strategy_name: str, symbol: str, quantity: float) -> None:
         """Update position after a sell."""
-        existing = self._positions.get(symbol)
+        key = (strategy_name, symbol)
+        existing = self._positions.get(key)
         if existing is None:
             return
 
         remaining = existing.quantity - quantity
         if remaining <= 1e-10:
-            del self._positions[symbol]
+            del self._positions[key]
         else:
-            self._positions[symbol] = PaperPosition(
+            self._positions[key] = PaperPosition(
                 symbol=symbol,
                 quantity=remaining,
                 avg_entry_price=existing.avg_entry_price,
                 exchange=self._exchange,
+                strategy_name=strategy_name,
             )

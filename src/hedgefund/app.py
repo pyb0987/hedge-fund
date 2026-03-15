@@ -185,6 +185,9 @@ def run_once(
     # 3. Restore strategy rebalancing state
     _restore_strategy_state(strategies)
 
+    # 3b. Skip Alpaca strategies on US market closed days (weekends)
+    strategies = _filter_strategies_for_market_hours(strategies, now)
+
     # 4. Set up crypto universe (requires live API call)
     _setup_crypto_universe(strategies, providers)
 
@@ -301,6 +304,38 @@ def _send_telegram_notification(
         notifier.close()
     except Exception:
         logger.exception("Telegram notification failed — continuing")
+
+
+def _is_us_market_day(dt: datetime) -> bool:
+    """Check if US stock markets are open (weekday check).
+
+    Simple Mon-Fri heuristic. Does not account for US holidays,
+    but running on a holiday is harmless (stale data, no actual trades).
+    """
+    return dt.weekday() < 5  # Mon=0..Fri=4
+
+
+def _filter_strategies_for_market_hours(
+    strategies: dict[str, Strategy],
+    now: datetime,
+) -> dict[str, Strategy]:
+    """Skip Alpaca-only strategies when US markets are closed.
+
+    Crypto (Upbit) runs 24/7, so crypto and cross-asset strategies
+    (e.g., dual_momentum with primary=UPBIT) always run.
+    """
+    if _is_us_market_day(now):
+        return strategies
+
+    active = {
+        name: s for name, s in strategies.items()
+        if s.exchange != Exchange.ALPACA
+    }
+    skipped = set(strategies) - set(active)
+    if skipped:
+        logger.info("US market closed — skipping: %s", ", ".join(sorted(skipped)))
+
+    return active
 
 
 def _symbol_exchange(symbol: str) -> Exchange:
@@ -423,7 +458,7 @@ def _persist_cycle_data(
         # E. Save position snapshots (per-strategy attribution)
         if strategies is not None:
             _persist_position_snapshots(
-                store, result.timestamp, strategies, executors,
+                store, result.timestamp, executors,
             )
 
         # F. Save strategy decisions (rebalance gate + allocation audit)
@@ -458,6 +493,7 @@ def _find_trade_pnl(
     # Search executor's trade history for matching trade
     for trade in reversed(executor.trades):
         if (trade.symbol == execution.order.symbol
+                and trade.strategy_name == execution.order.strategy_name
                 and trade.side == OrderSide.SELL
                 and trade.pnl is not None):
             return trade.pnl
@@ -500,19 +536,15 @@ def _persist_risk_events(
 def _persist_position_snapshots(
     store: DataStore,
     timestamp: datetime,
-    strategies: dict[str, Strategy],
     executors: dict[Exchange, PaperExecutor],
 ) -> None:
-    """Save per-position snapshot with strategy attribution."""
-    # Build symbol → strategy_name mapping from strategy universes
-    symbol_strategy: dict[str, str] = {}
-    for name, strategy in strategies.items():
-        for sym in strategy.get_universe():
-            # Last-write wins if symbols overlap (e.g., BIL in treasury + dual)
-            symbol_strategy[sym] = name
+    """Save per-position snapshot with strategy attribution.
 
+    Position keys are (strategy_name, symbol) tuples, providing
+    accurate attribution without universe-based guessing.
+    """
     for executor in executors.values():
-        for sym, pos in executor.positions.items():
+        for (strat_name, sym), pos in executor.positions.items():
             market_price = executor.get_current_price(sym)
             market_value = pos.quantity * market_price
             unrealized_pnl = (market_price - pos.avg_entry_price) * pos.quantity
@@ -521,7 +553,7 @@ def _persist_position_snapshots(
                 timestamp=timestamp,
                 symbol=sym,
                 exchange=pos.exchange.value,
-                strategy_name=symbol_strategy.get(sym, "unknown"),
+                strategy_name=strat_name,
                 quantity=pos.quantity,
                 avg_entry_price=pos.avg_entry_price,
                 market_price=market_price,

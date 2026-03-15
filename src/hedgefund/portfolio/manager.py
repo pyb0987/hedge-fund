@@ -144,29 +144,60 @@ class PortfolioManager:
             self._cycle_history.append(result)
             return result
 
-        # Step 4: Compute target values per symbol
+        # Step 4-5: Build orders per strategy with isolated positions
         allocation_weights = self._get_allocation_weights()
         prices = self._get_current_prices(all_signals)
-        current_positions = self._get_current_positions()
 
         max_position_value = total_value * self._risk_config.max_single_position
 
-        target_values: dict[str, float] = {}
+        # Group signals by strategy
+        strategy_signals: dict[str, list[Signal]] = {}
         for signal in all_signals:
-            if signal.direction == SignalDirection.LONG:
-                strategy_allocation = allocation_weights.get(signal.strategy_name, 0.0)
-                # Target = portfolio_value × strategy_allocation × signal_strength × DD_multiplier
-                target = total_value * strategy_allocation * signal.strength * dd_multiplier
-                # Cap at single position limit (15%) to avoid guaranteed risk rejection
-                target = min(target, max_position_value)
-                target_values[signal.symbol] = target
-            else:
-                target_values[signal.symbol] = 0.0  # FLAT = close
+            strategy_signals.setdefault(signal.strategy_name, []).append(signal)
 
-        # Step 5: Build orders
-        orders = build_orders_from_signals(
-            all_signals, prices, target_values, current_positions,
-        )
+        orders = []
+        for strat_name, strat_sigs in strategy_signals.items():
+            strat_targets: dict[str, float] = {}
+            strat_positions: dict[str, float] = {}
+
+            # Pre-fetch account info for live executor fallback (avoids N+1 calls)
+            first_exchange = strat_sigs[0].exchange if strat_sigs else None
+            strat_executor = self._executors.get(first_exchange) if first_exchange else None
+            use_strategy_positions = (
+                strat_executor is not None
+                and hasattr(strat_executor, "get_strategy_position_quantity")
+            )
+            fallback_account_info = (
+                strat_executor.get_account_info()
+                if strat_executor is not None and not use_strategy_positions
+                else None
+            )
+
+            for signal in strat_sigs:
+                if signal.direction == SignalDirection.LONG:
+                    strategy_allocation = allocation_weights.get(signal.strategy_name, 0.0)
+                    target = total_value * strategy_allocation * signal.strength * dd_multiplier
+                    target = min(target, max_position_value)
+                    strat_targets[signal.symbol] = target
+                else:
+                    strat_targets[signal.symbol] = 0.0  # FLAT = close
+
+                # Get strategy-scoped position quantity
+                if use_strategy_positions:
+                    strat_positions[signal.symbol] = strat_executor.get_strategy_position_quantity(  # type: ignore[union-attr]
+                        strat_name, signal.symbol,
+                    )
+                elif fallback_account_info is not None:
+                    strat_positions[signal.symbol] = fallback_account_info.positions.get(
+                        signal.symbol, 0.0,
+                    )
+                else:
+                    strat_positions[signal.symbol] = 0.0
+
+            strat_orders = build_orders_from_signals(
+                strat_sigs, prices, strat_targets, strat_positions,
+            )
+            orders.extend(strat_orders)
 
         # Step 6: Pre-trade risk check per order
         for order in orders:
@@ -275,17 +306,6 @@ class PortfolioManager:
                 prices[signal.symbol] = executor.get_current_price(signal.symbol)
         return prices
 
-    def _get_current_positions(self) -> dict[str, float]:
-        """Get current positions across all executors."""
-        positions: dict[str, float] = {}
-        for executor in self._executors.values():
-            try:
-                info = executor.get_account_info()
-                positions.update(info.positions)
-            except Exception:
-                pass
-        return positions
-
     def _get_strategy_total_value(self, strategy_name: str) -> float:
         """Get total value for a specific strategy's positions."""
         strategy = self._strategies.get(strategy_name)
@@ -298,6 +318,16 @@ class PortfolioManager:
         if executor is None:
             return 0.0
 
+        # Use strategy-scoped positions if available (PaperExecutor)
+        if hasattr(executor, "get_strategy_position_quantity"):
+            for symbol in universe:
+                qty = executor.get_strategy_position_quantity(strategy_name, symbol)
+                if qty > 0:
+                    price = executor.get_current_price(symbol)
+                    total += qty * price
+            return total
+
+        # Fallback for live executors: universe-based heuristic
         info = executor.get_account_info()
         for symbol in universe:
             qty = info.positions.get(symbol, 0.0)

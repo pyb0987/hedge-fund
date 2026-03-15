@@ -15,7 +15,8 @@ from hedgefund.execution.executors.paper_executor import PaperExecutor, PaperPos
 
 logger = logging.getLogger(__name__)
 
-_STATE_VERSION = 1
+_EXECUTOR_STATE_VERSION = 2
+_STRATEGY_STATE_VERSION = 1
 
 
 def save_state(executor: PaperExecutor, path: Path) -> None:
@@ -25,14 +26,15 @@ def save_state(executor: PaperExecutor, path: Path) -> None:
         executor: the paper executor to save
         path: file path for the state JSON
     """
-    positions = {}
-    for sym, pos in executor._positions.items():
-        positions[sym] = {
+    positions = []
+    for (_strat, _sym), pos in executor._positions.items():
+        positions.append({
+            "strategy_name": pos.strategy_name,
             "symbol": pos.symbol,
             "quantity": pos.quantity,
             "avg_entry_price": pos.avg_entry_price,
             "exchange": pos.exchange.value,
-        }
+        })
 
     trades = []
     for trade in executor._trades:
@@ -50,7 +52,7 @@ def save_state(executor: PaperExecutor, path: Path) -> None:
         })
 
     state = {
-        "version": _STATE_VERSION,
+        "version": _EXECUTOR_STATE_VERSION,
         "exchange": executor.exchange.value,
         "cash": executor.cash,
         "initial_cash": executor._initial_cash,
@@ -84,9 +86,9 @@ def load_state(path: Path) -> PaperExecutor | None:
         state = json.load(f)
 
     version = state.get("version", 0)
-    if version != _STATE_VERSION:
+    if version != _EXECUTOR_STATE_VERSION:
         logger.warning("State version mismatch: expected %d, got %d — starting fresh",
-                       _STATE_VERSION, version)
+                       _EXECUTOR_STATE_VERSION, version)
         return None
 
     exchange = Exchange(state["exchange"])
@@ -99,12 +101,14 @@ def load_state(path: Path) -> PaperExecutor | None:
     executor._cash = state["cash"]
 
     # Restore positions
-    for _sym, pos_data in state["positions"].items():
-        executor._positions[pos_data["symbol"]] = PaperPosition(
+    for pos_data in state["positions"]:
+        key = (pos_data["strategy_name"], pos_data["symbol"])
+        executor._positions[key] = PaperPosition(
             symbol=pos_data["symbol"],
             quantity=pos_data["quantity"],
             avg_entry_price=pos_data["avg_entry_price"],
             exchange=Exchange(pos_data["exchange"]),
+            strategy_name=pos_data["strategy_name"],
         )
 
     logger.info("Restored paper executor: exchange=%s, cash=%.0f, positions=%d",
@@ -129,7 +133,7 @@ def save_strategy_state(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
-        json.dump({"version": _STATE_VERSION, "last_rebalance": state}, f, indent=2)
+        json.dump({"version": _STRATEGY_STATE_VERSION, "last_rebalance": state}, f, indent=2)
 
     logger.info("Saved strategy state: %s", {k: v is not None for k, v in state.items()})
 
@@ -146,7 +150,7 @@ def load_strategy_state(path: Path) -> dict[str, datetime | None]:
     with open(path) as f:
         data = json.load(f)
 
-    if data.get("version") != _STATE_VERSION:
+    if data.get("version") != _STRATEGY_STATE_VERSION:
         logger.warning("Strategy state version mismatch — starting fresh")
         return {}
 

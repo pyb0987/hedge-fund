@@ -32,8 +32,12 @@
 - CLI: `uv run python -m hedgefund paper-run [--dry-run] [--verbose]`
 - 구동 주기: 일 1회 (매일 21:00 KST 권장)
 - 리밸런싱 게이트: crypto=14일(격주), dual_momentum=월간, etf=매일(z-score)
+- **주말 필터링**: US 시장 휴장일(토/일)에 Alpaca 전략 스킵, crypto+dual_momentum만 실행
 - 상태 저장: `data/paper_state/{upbit,alpaca,strategies}.json`
 - Two PaperExecutors: UPBIT (KRW) + ALPACA (USD), 자본 분할 기반
+- **전략별 포지션 격리**: `PaperPosition`에 `strategy_name` 포함, `_positions` 키 = `(strategy_name, symbol)` 튜플. SELL 시 동일 전략 포지션만 청산. `get_account_info().positions`는 심볼별 aggregate (Protocol 호환)
+- `get_strategy_position_quantity(strategy_name, symbol)`: 전략별 포지션 조회 (PaperExecutor 전용)
+- Executor state version: v2 (positions를 list로 직렬화, strategy_name 포함). v1 파일은 자동 거부 → fresh start
 
 ## Strategies
 | Strategy | Allocation | Exchange | Direction | 역할 |
@@ -65,3 +69,5 @@
 - z-score 버그 (Phase 6 수정): `mean(window) × lookback ≡ sum(window)` → 분자 항상 0 → ETF MR 비활성. CLT 기반 z = Σr / (σ√N)으로 수정
 - 교차 전략 노출 미관리 (Phase 6 추가): BTC가 crypto+dual에서 최대 41.7% → check_symbol_aggregate_exposure() 추가
 - Market Hedge NO-GO (Phase 6 리뷰): SPY+SH 동시 보유 충돌, 인버스 ETF 변동성 감쇠 -4%/년, 단일 레짐 전용 → allocation 0으로 비활성화
+- 전략 간 포지션 격리 부재 (Paper Trading 중간점검): PaperExecutor가 심볼 단위로만 포지션 관리 → ETF MR이 Dual Momentum의 TLT/GLD 포지션 강제 청산. `(strategy_name, symbol)` 복합 키로 격리 구현, state v2, 오염 데이터 리셋
+- ETF MR z_entry=-1.5 구조적 미도달 (Paper Trading 중간점검): drift correction으로 SPY/QQQ z-score 최솟값 -1.08, -1.5 도달 불가. 7.8개월 OHLCV 분석 후 -1.0으로 완화 (80% 승률, 5일 +1.02%)

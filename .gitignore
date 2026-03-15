@@ -23,6 +23,7 @@ venv/
 .DS_Store
 *.swp
 *.swo
+.claude/
 
 docker/*.env
 

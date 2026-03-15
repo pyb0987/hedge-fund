@@ -101,10 +101,10 @@ class TestStatePersistence:
         with open(state_path) as f:
             data = json.load(f)
 
-        assert data["version"] == 1
+        assert data["version"] == 2
         assert data["exchange"] == "upbit"
         assert data["cash"] == 1_000_000.0
-        assert isinstance(data["positions"], dict)
+        assert isinstance(data["positions"], list)
         assert isinstance(data["trades"], list)
 
     def test_save_creates_parent_dirs(self, tmp_path: Path):
@@ -144,6 +144,64 @@ class TestStatePersistence:
         assert restored is not None
         assert restored.get_position_quantity("KRW-BTC") == pytest.approx(0.01)
         assert restored.get_position_quantity("KRW-ETH") == pytest.approx(0.5)
+
+
+    def test_roundtrip_preserves_strategy_name(self, tmp_path: Path):
+        """Strategy name on positions survives save/load roundtrip."""
+        executor = PaperExecutor(Exchange.UPBIT, 10_000_000.0)
+        executor.set_prices({"KRW-BTC": 50_000_000.0, "KRW-ETH": 3_000_000.0})
+
+        order_a = Order(
+            strategy_name="crypto_momentum",
+            symbol="KRW-BTC",
+            exchange=Exchange.UPBIT,
+            side=OrderSide.BUY,
+            quantity=0.01,
+            price=50_000_000.0,
+            status=OrderStatus.PENDING,
+            timestamp=datetime.now(),
+        )
+        order_b = Order(
+            strategy_name="dual_momentum",
+            symbol="KRW-BTC",
+            exchange=Exchange.UPBIT,
+            side=OrderSide.BUY,
+            quantity=0.02,
+            price=50_000_000.0,
+            status=OrderStatus.PENDING,
+            timestamp=datetime.now(),
+        )
+        executor.submit_order(order_a)
+        executor.submit_order(order_b)
+
+        state_path = tmp_path / "state.json"
+        save_state(executor, state_path)
+        restored = load_state(state_path)
+
+        assert restored is not None
+        assert restored.get_strategy_position_quantity("crypto_momentum", "KRW-BTC") == pytest.approx(0.01)
+        assert restored.get_strategy_position_quantity("dual_momentum", "KRW-BTC") == pytest.approx(0.02)
+        assert restored.get_position_quantity("KRW-BTC") == pytest.approx(0.03)
+
+    def test_v1_state_rejected(self, tmp_path: Path):
+        """Old v1 state files are rejected (version mismatch -> fresh start)."""
+        state_path = tmp_path / "state.json"
+        state_path.write_text(json.dumps({
+            "version": 1,
+            "exchange": "upbit",
+            "cash": 1_000_000,
+            "initial_cash": 1_000_000,
+            "positions": {"KRW-BTC": {
+                "symbol": "KRW-BTC",
+                "quantity": 0.01,
+                "avg_entry_price": 50_000_000,
+                "exchange": "upbit",
+            }},
+            "trades": [],
+        }))
+
+        result = load_state(state_path)
+        assert result is None
 
 
 class TestStrategyState:

@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from hedgefund.app import _symbol_exchange, run_once
+from hedgefund.app import (
+    _filter_strategies_for_market_hours,
+    _is_us_market_day,
+    _symbol_exchange,
+    run_once,
+)
 from hedgefund.core.enums import Exchange
 
 
@@ -22,6 +27,48 @@ class TestSymbolExchange:
         assert _symbol_exchange("SPY") == Exchange.ALPACA
         assert _symbol_exchange("TLT") == Exchange.ALPACA
         assert _symbol_exchange("QQQ") == Exchange.ALPACA
+
+
+class TestMarketHoursFilter:
+    """Tests for US market day detection and strategy filtering."""
+
+    def test_weekdays_are_market_days(self):
+        assert _is_us_market_day(datetime(2026, 3, 16)) is True
+        assert _is_us_market_day(datetime(2026, 3, 20)) is True
+
+    def test_weekends_are_not_market_days(self):
+        assert _is_us_market_day(datetime(2026, 3, 14)) is False
+        assert _is_us_market_day(datetime(2026, 3, 15)) is False
+
+    def test_weekday_keeps_all_strategies(self):
+        crypto = MagicMock(exchange=Exchange.UPBIT)
+        etf_mr = MagicMock(exchange=Exchange.ALPACA)
+        strategies = {"crypto_momentum": crypto, "etf_mean_reversion": etf_mr}
+
+        monday = datetime(2026, 3, 16)
+        result = _filter_strategies_for_market_hours(strategies, monday)
+
+        assert set(result.keys()) == {"crypto_momentum", "etf_mean_reversion"}
+
+    def test_weekend_skips_alpaca_strategies(self):
+        crypto = MagicMock(exchange=Exchange.UPBIT)
+        dual = MagicMock(exchange=Exchange.UPBIT)
+        etf_mr = MagicMock(exchange=Exchange.ALPACA)
+        treasury = MagicMock(exchange=Exchange.ALPACA)
+
+        strategies = {
+            "crypto_momentum": crypto,
+            "dual_momentum": dual,
+            "etf_mean_reversion": etf_mr,
+            "treasury_park": treasury,
+        }
+
+        saturday = datetime(2026, 3, 14)
+        result = _filter_strategies_for_market_hours(strategies, saturday)
+
+        assert set(result.keys()) == {"crypto_momentum", "dual_momentum"}
+        assert "etf_mean_reversion" not in result
+        assert "treasury_park" not in result
 
 
 def _make_ohlcv(n: int = 30, base_price: float = 100.0) -> pd.DataFrame:
