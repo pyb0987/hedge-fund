@@ -28,7 +28,7 @@ class ExchangeCosts:
 # Exchange cost definitions
 EXCHANGE_COSTS: dict[Exchange, ExchangeCosts] = {
     Exchange.UPBIT: ExchangeCosts(
-        commission_rate=0.0025,  # 0.25% maker/taker
+        commission_rate=0.0005,  # 0.05% maker/taker
         slippage_rate=0.0015,  # 0.15% estimated
         min_order_value=5_000.0,  # 5,000 KRW
     ),

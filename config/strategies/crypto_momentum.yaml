@@ -14,7 +14,7 @@ parameters:
 
 # Transaction costs
 costs:
-  commission_rate: 0.0025    # 0.25% (Upbit maker/taker)
+  commission_rate: 0.0005    # 0.05% (Upbit maker/taker)
   slippage_rate: 0.0015      # 0.15% 예상 슬리피지
 
 # Go/No-Go criteria (backtest minimum)

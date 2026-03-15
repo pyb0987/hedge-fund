@@ -155,7 +155,7 @@ class CryptoMomentumConfig(BaseModel):
     universe_size: int = Field(default=15, ge=5, le=50)
     min_volume_krw: float = Field(default=1_000_000_000, ge=0)
 
-    costs: CostConfig = CostConfig(commission_rate=0.0025, slippage_rate=0.0015)
+    costs: CostConfig = CostConfig(commission_rate=0.0005, slippage_rate=0.0015)
     validation: ValidationConfig = ValidationConfig()
 
 

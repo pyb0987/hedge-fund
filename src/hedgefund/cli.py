@@ -333,7 +333,7 @@ def validate_wf(
 
         cfg = configs.get(name)
         cost_config = BacktestConfig(
-            commission_rate=cfg.costs.commission_rate if hasattr(cfg, "costs") else 0.0025,
+            commission_rate=cfg.costs.commission_rate if hasattr(cfg, "costs") else 0.0005,
             slippage_rate=cfg.costs.slippage_rate if hasattr(cfg, "costs") else 0.0015,
         )
 
@@ -448,7 +448,7 @@ def optimize(
                 "holding_days": [7, 14, 21],
             },
             "symbols": ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA"],
-            "cost_config": BacktestConfig(commission_rate=0.0025, slippage_rate=0.0015),
+            "cost_config": BacktestConfig(commission_rate=0.0005, slippage_rate=0.0015),
         },
         "dual_momentum": {
             "factory": lambda p: DualMomentumStrategy(DualMomentumConfig(**p)),
@@ -456,7 +456,7 @@ def optimize(
                 "lookback_days": [40, 60, 90, 120],
             },
             "symbols": ["KRW-BTC", "SPY", "TLT", "GLD", "BIL"],
-            "cost_config": BacktestConfig(commission_rate=0.00125, slippage_rate=0.001),
+            "cost_config": BacktestConfig(commission_rate=0.00025, slippage_rate=0.001),
         },
         "sector_momentum": {
             "factory": lambda p: SectorMomentumStrategy(SectorMomentumConfig(**p)),

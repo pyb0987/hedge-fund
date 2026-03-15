@@ -58,7 +58,7 @@ class BacktestConfig:
     """Backtest configuration."""
 
     initial_capital: float = 1_000_000.0
-    commission_rate: float = 0.0025  # 0.25%
+    commission_rate: float = 0.0005  # 0.05%
     slippage_rate: float = 0.0015  # 0.15%
 
 

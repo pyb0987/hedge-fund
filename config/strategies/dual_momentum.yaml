@@ -29,7 +29,7 @@ assets:
 
 # Transaction costs (blended)
 costs:
-  commission_rate: 0.00125   # 가중 평균 수수료
+  commission_rate: 0.00025   # 가중 평균 수수료 (Upbit 0.05% + Alpaca 0%)
   slippage_rate: 0.001       # 가중 평균 슬리피지
 
 # Go/No-Go criteria
