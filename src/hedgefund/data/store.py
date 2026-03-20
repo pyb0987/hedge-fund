@@ -2,13 +2,12 @@
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
 
 import pandas as pd
-
 
 _OHLCV_TABLE = """
 CREATE TABLE IF NOT EXISTS ohlcv (
@@ -161,17 +160,19 @@ class DataStore:
 
         rows = []
         for ts, row in df.iterrows():
-            rows.append((
-                symbol,
-                exchange,
-                str(ts),
-                float(row["open"]),
-                float(row["high"]),
-                float(row["low"]),
-                float(row["close"]),
-                float(row["volume"]),
-                interval,
-            ))
+            rows.append(
+                (
+                    symbol,
+                    exchange,
+                    str(ts),
+                    float(row["open"]),
+                    float(row["high"]),
+                    float(row["low"]),
+                    float(row["close"]),
+                    float(row["volume"]),
+                    interval,
+                )
+            )
 
         with self._connection() as conn:
             conn.executemany(
@@ -247,7 +248,15 @@ class DataStore:
                 "INSERT INTO portfolio_snapshots "
                 "(timestamp, total_value, cash, unrealized_pnl, realized_pnl, drawdown, peak_value) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (str(timestamp), total_value, cash, unrealized_pnl, realized_pnl, drawdown, peak_value),
+                (
+                    str(timestamp),
+                    total_value,
+                    cash,
+                    unrealized_pnl,
+                    realized_pnl,
+                    drawdown,
+                    peak_value,
+                ),
             )
 
     def load_snapshots(self) -> pd.DataFrame:
@@ -282,8 +291,18 @@ class DataStore:
                 "(symbol, exchange, side, quantity, price, commission, slippage, "
                 "strategy_name, timestamp, pnl) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (symbol, exchange, side, quantity, price, commission, slippage,
-                 strategy_name, str(timestamp), pnl),
+                (
+                    symbol,
+                    exchange,
+                    side,
+                    quantity,
+                    price,
+                    commission,
+                    slippage,
+                    strategy_name,
+                    str(timestamp),
+                    pnl,
+                ),
             )
 
     def load_trades(self) -> pd.DataFrame:
@@ -314,8 +333,7 @@ class DataStore:
                 "INSERT INTO signals "
                 "(timestamp, strategy_name, symbol, exchange, direction, strength, metadata) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (str(timestamp), strategy_name, symbol, exchange, direction,
-                 strength, meta_str),
+                (str(timestamp), strategy_name, symbol, exchange, direction, strength, meta_str),
             )
 
     def load_signals(self) -> pd.DataFrame:
@@ -348,8 +366,17 @@ class DataStore:
                 "(timestamp, event_type, symbol, strategy_name, rule_name, "
                 "passed, current_value, limit_value, message) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(timestamp), event_type, symbol, strategy_name,
-                 rule_name, int(passed), current_value, limit_value, message),
+                (
+                    str(timestamp),
+                    event_type,
+                    symbol,
+                    strategy_name,
+                    rule_name,
+                    int(passed),
+                    current_value,
+                    limit_value,
+                    message,
+                ),
             )
 
     def load_risk_events(self) -> pd.DataFrame:
@@ -382,9 +409,17 @@ class DataStore:
                 "(timestamp, symbol, exchange, strategy_name, quantity, "
                 "avg_entry_price, market_price, market_value, unrealized_pnl) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(timestamp), symbol, exchange, strategy_name,
-                 quantity, avg_entry_price, market_price, market_value,
-                 unrealized_pnl),
+                (
+                    str(timestamp),
+                    symbol,
+                    exchange,
+                    strategy_name,
+                    quantity,
+                    avg_entry_price,
+                    market_price,
+                    market_value,
+                    unrealized_pnl,
+                ),
             )
 
     def load_position_snapshots(self) -> pd.DataFrame:
@@ -396,6 +431,7 @@ class DataStore:
             )
         if not df.empty:
             df["timestamp"] = pd.to_datetime(df["timestamp"])
+            df = df.set_index("timestamp")
         return df
 
     def save_strategy_decision(
@@ -416,9 +452,16 @@ class DataStore:
                 "(timestamp, strategy_name, action, reason, signals_generated, "
                 "target_allocation, actual_allocation, dd_multiplier) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(timestamp), strategy_name, action, reason,
-                 signals_generated, target_allocation, actual_allocation,
-                 dd_multiplier),
+                (
+                    str(timestamp),
+                    strategy_name,
+                    action,
+                    reason,
+                    signals_generated,
+                    target_allocation,
+                    actual_allocation,
+                    dd_multiplier,
+                ),
             )
 
     def load_strategy_decisions(self) -> pd.DataFrame:

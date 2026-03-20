@@ -29,7 +29,7 @@
 - 거래소: Upbit (crypto KRW), Alpaca (US ETF + inverse ETF)
 
 ## Paper Trading
-- CLI: `uv run python -m hedgefund paper-run [--dry-run] [--verbose]`
+- CLI: `uv run python -m hedgefund paper-run [--dry-run] [--verbose]`, `paper-reset [--yes]`
 - 구동 주기: 일 1회 (매일 21:00 KST 권장)
 - 리밸런싱 게이트: crypto=14일(격주), dual_momentum=월간, etf=매일(z-score)
 - **주말 필터링**: US 시장 휴장일(토/일)에 Alpaca 전략 스킵, crypto+dual_momentum만 실행
@@ -64,6 +64,13 @@
 - Execution: `src/hedgefund/execution/` (protocols, cost_model, order_builder, state, executors/)
 - App: `src/hedgefund/app.py` (wiring), `cli.py` (typer), `__main__.py`
 - Scheduler: `src/hedgefund/scheduler/runner.py`
+
+## Harness (Autonomous Feedback Loop)
+- **Hooks**: `.claude/hooks/` — auto-format(ruff), file-protection(.env/paper_state), stop-test-verification, desktop-notification
+- **Slash Commands**: `/validate`, `/paper-check`, `/entropy-check`, `/risk-audit`, `/strategy-review`
+- **Architecture Tests**: `tests/test_architecture.py` — dependency layering, frozen dataclass, Strategy Protocol, file size, circular import, risk config, Executor Protocol (기계적 강제)
+- **Protected Files**: .env*, data/paper_state/*, data/hedgefund.db (에이전트 수정 차단)
+- **Warning Files**: config/settings.yaml, pyproject.toml (수정 허용하되 경고)
 
 ## Critical Bug History
 - z-score 버그 (Phase 6 수정): `mean(window) × lookback ≡ sum(window)` → 분자 항상 0 → ETF MR 비활성. CLT 기반 z = Σr / (σ√N)으로 수정

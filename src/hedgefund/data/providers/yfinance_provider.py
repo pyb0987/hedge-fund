@@ -7,6 +7,8 @@ import yfinance as yf
 
 from hedgefund.core.exceptions import DataProviderError, InsufficientDataError
 
+_API_TIMEOUT = 30  # seconds per API call
+
 _INTERVAL_MAP = {
     "day": "1d",
     "week": "1wk",
@@ -59,7 +61,11 @@ class YFinanceProvider:
 
         try:
             ticker = yf.Ticker(symbol)
-            df = ticker.history(period=period, interval=yf_interval)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(ticker.history, period=period, interval=yf_interval)
+                df = future.result(timeout=_API_TIMEOUT)
+        except FuturesTimeout:
+            raise DataProviderError(f"yfinance API timeout ({_API_TIMEOUT}s) for {symbol}")
         except Exception as e:
             raise DataProviderError(f"yfinance error for {symbol}: {e}") from e
 
@@ -86,18 +92,21 @@ class YFinanceProvider:
 
         try:
             ticker = yf.Ticker(symbol)
-            df = ticker.history(
-                start=start_with_buffer.strftime("%Y-%m-%d"),
-                end=(end + timedelta(days=1)).strftime("%Y-%m-%d"),
-                interval=yf_interval,
-            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    ticker.history,
+                    start=start_with_buffer.strftime("%Y-%m-%d"),
+                    end=(end + timedelta(days=1)).strftime("%Y-%m-%d"),
+                    interval=yf_interval,
+                )
+                df = future.result(timeout=_API_TIMEOUT)
+        except FuturesTimeout:
+            raise DataProviderError(f"yfinance API timeout ({_API_TIMEOUT}s) for {symbol}")
         except Exception as e:
             raise DataProviderError(f"yfinance error for {symbol}: {e}") from e
 
         if df is None or df.empty:
-            raise InsufficientDataError(
-                f"No data for {symbol} in range {start} ~ {end}"
-            )
+            raise InsufficientDataError(f"No data for {symbol} in range {start} ~ {end}")
 
         df = _normalize_columns(df)
         # Filter to exact range (tz-naive comparison)

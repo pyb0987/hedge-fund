@@ -14,11 +14,14 @@ import json
 import logging
 import subprocess
 import sys
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_CYCLE_TIMEOUT = 600  # 10 minutes — safety net for entire paper-run
 PLIST_NAME = "com.hedgefund.paper"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_NAME}.plist"
 RUN_LOG_PATH = Path("data/paper_state/run_log.json")
@@ -30,7 +33,7 @@ LOG_DIR = Path.home() / "Library" / "Logs" / "hedgefund"
 
 def has_run_today(log_path: Path = RUN_LOG_PATH) -> bool:
     """Check if daily cycle already ran today (UTC date)."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     if not log_path.exists():
         return False
     try:
@@ -42,12 +45,16 @@ def has_run_today(log_path: Path = RUN_LOG_PATH) -> bool:
 
 def mark_run_today(log_path: Path = RUN_LOG_PATH) -> None:
     """Mark today's run as completed (UTC date)."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(json.dumps({
-        "last_run_date": today,
-        "last_run_utc": datetime.now(timezone.utc).isoformat(),
-    }))
+    log_path.write_text(
+        json.dumps(
+            {
+                "last_run_date": today,
+                "last_run_utc": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
 
 
 # --- Daily cycle: paper-run → report → Telegram digest ---
@@ -86,18 +93,30 @@ def run_daily_cycle(
         generate_report,
     )
 
-    # Step 1: Run paper trading cycle
+    # Step 1: Run paper trading cycle (with timeout safety net)
     try:
-        result = run_once(config_dir=config_dir, dry_run=False)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(run_once, config_dir=config_dir, dry_run=False)
+            result = future.result(timeout=_CYCLE_TIMEOUT)
         logger.info(
             "Paper run complete: signals=%d, trades=%d, value=%.0f",
             len(result.cycle_result.signals),
             result.cycle_result.num_trades,
             result.portfolio_value,
         )
+    except FuturesTimeout:
+        logger.error("Paper run timed out after %ds", _CYCLE_TIMEOUT)
+        _send_error_notification(
+            config_dir,
+            f"Paper run timed out after {_CYCLE_TIMEOUT}s\n"
+            "API 응답 없음 — 네트워크 또는 거래소 점검 확인 필요",
+        )
+        mark_run_today()
+        return False
     except Exception:
+        tb = traceback.format_exc()
         logger.exception("Paper run failed")
-        _send_error_notification(config_dir, "Paper run failed")
+        _send_error_notification(config_dir, f"Paper run failed\n\n<pre>{tb[-500:]}</pre>")
         return False
 
     # Step 2: Generate validation report
@@ -108,7 +127,9 @@ def run_daily_cycle(
         report_text = format_report(report)
         logger.info("Report generated:\n%s", report_text)
     except Exception:
+        tb = traceback.format_exc()
         logger.exception("Report generation failed")
+        _send_error_notification(config_dir, f"Report generation failed\n\n<pre>{tb[-500:]}</pre>")
         mark_run_today()
         return True
 
@@ -118,11 +139,13 @@ def run_daily_cycle(
         if tg_config.enabled and tg_config.bot_token:
             from hedgefund.monitoring.telegram import TelegramConfig, TelegramNotifier
 
-            notifier = TelegramNotifier(TelegramConfig(
-                bot_token=tg_config.bot_token,
-                chat_id=tg_config.chat_id,
-                enabled=True,
-            ))
+            notifier = TelegramNotifier(
+                TelegramConfig(
+                    bot_token=tg_config.bot_token,
+                    chat_id=tg_config.chat_id,
+                    enabled=True,
+                )
+            )
             notifier.notify_daily_digest(report)
             notifier.close()
             logger.info("Telegram daily digest sent")
@@ -145,11 +168,13 @@ def _send_error_notification(config_dir: Path, message: str) -> None:
         if not tg.enabled or not tg.bot_token:
             return
 
-        notifier = TelegramNotifier(TelegramConfig(
-            bot_token=tg.bot_token,
-            chat_id=tg.chat_id,
-            enabled=True,
-        ))
+        notifier = TelegramNotifier(
+            TelegramConfig(
+                bot_token=tg.bot_token,
+                chat_id=tg.chat_id,
+                enabled=True,
+            )
+        )
         notifier.send_message(f"<b>ERROR</b>\n{message}")
         notifier.close()
     except Exception:

@@ -20,7 +20,6 @@ import pandas as pd
 from hedgefund.core import risk_metrics
 from hedgefund.data.store import DataStore
 
-
 # --- Report data structures ---
 
 
@@ -258,15 +257,12 @@ def analyze_risk_compliance(
     risk_rejections = 0
     cycles_blocked = 0
     if risk_events_df is not None and not risk_events_df.empty:
-        is_rejection = (
-            (risk_events_df["event_type"] == "execution_failed")
-            | ((risk_events_df["passed"] == 0)
-               & (risk_events_df["event_type"].isin(["pre_trade", "order_rejected"])))
+        is_rejection = (risk_events_df["event_type"] == "execution_failed") | (
+            (risk_events_df["passed"] == 0)
+            & (risk_events_df["event_type"].isin(["pre_trade", "order_rejected"]))
         )
         risk_rejections = int(is_rejection.sum())
-        cycles_blocked = int(
-            (risk_events_df["event_type"] == "cycle_blocked").sum()
-        )
+        cycles_blocked = int((risk_events_df["event_type"] == "cycle_blocked").sum())
 
     return RiskComplianceReport(
         max_observed_drawdown=max_dd,
@@ -299,25 +295,29 @@ def analyze_strategy_performance(
         num_positions = len(strat_positions)
 
         # Trade stats
-        strat_trades = trades_df[trades_df["strategy_name"] == name] if not trades_df.empty else pd.DataFrame()
+        strat_trades = (
+            trades_df[trades_df["strategy_name"] == name] if not trades_df.empty else pd.DataFrame()
+        )
         trade_count = len(strat_trades)
-        total_commission = float(strat_trades["commission"].sum()) if not strat_trades.empty else 0.0
+        total_commission = (
+            float(strat_trades["commission"].sum()) if not strat_trades.empty else 0.0
+        )
 
         # Holding period from position snapshots (first → last appearance)
-        strat_all = position_snapshots_df[
-            position_snapshots_df["strategy_name"] == name
-        ]
+        strat_all = position_snapshots_df[position_snapshots_df["strategy_name"] == name]
         avg_holding = _compute_avg_holding_days(strat_all)
 
-        reports.append(StrategyPerformanceReport(
-            strategy_name=name,
-            total_value=total_value,
-            total_pnl=total_pnl,
-            num_positions=num_positions,
-            avg_holding_days=avg_holding,
-            trade_count=trade_count,
-            total_commission=total_commission,
-        ))
+        reports.append(
+            StrategyPerformanceReport(
+                strategy_name=name,
+                total_value=total_value,
+                total_pnl=total_pnl,
+                num_positions=num_positions,
+                avg_holding_days=avg_holding,
+                trade_count=trade_count,
+                total_commission=total_commission,
+            )
+        )
 
     return tuple(reports)
 
@@ -339,14 +339,16 @@ def analyze_rebalancing_gates(
         skip = int((strat["action"] == "skip_no_data").sum())
         avg_dd = float(strat["dd_multiplier"].mean()) if total > 0 else 1.0
 
-        reports.append(RebalancingGateReport(
-            strategy_name=name,
-            total_decisions=total,
-            rebalance_count=rebalance,
-            hold_count=hold,
-            skip_count=skip,
-            avg_dd_multiplier=avg_dd,
-        ))
+        reports.append(
+            RebalancingGateReport(
+                strategy_name=name,
+                total_decisions=total,
+                rebalance_count=rebalance,
+                hold_count=hold,
+                skip_count=skip,
+                avg_dd_multiplier=avg_dd,
+            )
+        )
 
     return tuple(reports)
 
@@ -361,25 +363,30 @@ def analyze_holding_periods(
     reports: list[HoldingPeriodReport] = []
 
     for name in sorted(position_snapshots_df["strategy_name"].unique()):
-        strat = position_snapshots_df[
-            position_snapshots_df["strategy_name"] == name
-        ]
+        strat = position_snapshots_df[position_snapshots_df["strategy_name"] == name]
         holding_days = _compute_holding_days_per_symbol(strat)
 
         if not holding_days:
-            reports.append(HoldingPeriodReport(
-                strategy_name=name, avg_days=0.0,
-                min_days=0, max_days=0, num_positions_tracked=0,
-            ))
+            reports.append(
+                HoldingPeriodReport(
+                    strategy_name=name,
+                    avg_days=0.0,
+                    min_days=0,
+                    max_days=0,
+                    num_positions_tracked=0,
+                )
+            )
             continue
 
-        reports.append(HoldingPeriodReport(
-            strategy_name=name,
-            avg_days=float(np.mean(holding_days)),
-            min_days=int(min(holding_days)),
-            max_days=int(max(holding_days)),
-            num_positions_tracked=len(holding_days),
-        ))
+        reports.append(
+            HoldingPeriodReport(
+                strategy_name=name,
+                avg_days=float(np.mean(holding_days)),
+                min_days=int(min(holding_days)),
+                max_days=int(max(holding_days)),
+                num_positions_tracked=len(holding_days),
+            )
+        )
 
     return tuple(reports)
 
@@ -511,36 +518,40 @@ def format_report(report: PaperReport) -> str:
     if perf.insufficient_data:
         lines.append(f"  WARNING: Insufficient data ({perf.num_cycles} cycles, need 10+)")
 
-    lines.extend([
-        f"  Sharpe Ratio:       {perf.sharpe_ratio:>10.2f}",
-        f"  Sortino Ratio:      {perf.sortino_ratio:>10.2f}",
-        f"  Annualized Return:  {perf.annualized_return:>10.2%}",
-        f"  Total Return:       {perf.total_return:>10.2%}",
-        f"  Max Drawdown:       {perf.max_drawdown:>10.2%}",
-        f"  Profit Factor:      {perf.profit_factor:>10.2f}",
-        f"  Win Rate:           {perf.win_rate:>10.2%}",
-        f"  Cycles:             {perf.num_cycles:>10d}",
-        "",
-        "Risk Compliance:",
-        f"  Max Observed DD:    {risk.max_observed_drawdown:>10.2%}",
-        f"  DD Activations:     {risk.drawdown_activations:>10d}",
-        f"  Risk Rejections:    {risk.risk_rejections:>10d}",
-        f"  Cycles Blocked:     {risk.cycles_blocked:>10d}",
-    ])
+    lines.extend(
+        [
+            f"  Sharpe Ratio:       {perf.sharpe_ratio:>10.2f}",
+            f"  Sortino Ratio:      {perf.sortino_ratio:>10.2f}",
+            f"  Annualized Return:  {perf.annualized_return:>10.2%}",
+            f"  Total Return:       {perf.total_return:>10.2%}",
+            f"  Max Drawdown:       {perf.max_drawdown:>10.2%}",
+            f"  Profit Factor:      {perf.profit_factor:>10.2f}",
+            f"  Win Rate:           {perf.win_rate:>10.2%}",
+            f"  Cycles:             {perf.num_cycles:>10d}",
+            "",
+            "Risk Compliance:",
+            f"  Max Observed DD:    {risk.max_observed_drawdown:>10.2%}",
+            f"  DD Activations:     {risk.drawdown_activations:>10d}",
+            f"  Risk Rejections:    {risk.risk_rejections:>10d}",
+            f"  Cycles Blocked:     {risk.cycles_blocked:>10d}",
+        ]
+    )
 
     # Per-strategy performance
     if report.strategy_performance:
         lines.extend(["", "Per-Strategy Performance:"])
         for sp in report.strategy_performance:
-            lines.extend([
-                f"  [{sp.strategy_name}]",
-                f"    Value: {sp.total_value:>12,.0f}  "
-                f"PnL: {sp.total_pnl:>+10,.0f}  "
-                f"Positions: {sp.num_positions}  "
-                f"Trades: {sp.trade_count}",
-                f"    Avg Holding: {sp.avg_holding_days:.0f}d  "
-                f"Commission: {sp.total_commission:,.0f}",
-            ])
+            lines.extend(
+                [
+                    f"  [{sp.strategy_name}]",
+                    f"    Value: {sp.total_value:>12,.0f}  "
+                    f"PnL: {sp.total_pnl:>+10,.0f}  "
+                    f"Positions: {sp.num_positions}  "
+                    f"Trades: {sp.trade_count}",
+                    f"    Avg Holding: {sp.avg_holding_days:.0f}d  "
+                    f"Commission: {sp.total_commission:,.0f}",
+                ]
+            )
 
     # Rebalancing gate audit
     if report.rebalancing_gates:
@@ -565,15 +576,17 @@ def format_report(report: PaperReport) -> str:
                     f"(n={hp.num_positions_tracked})"
                 )
 
-    lines.extend([
-        "",
-        "Go/No-Go Validation:",
-        f"  [{'PASS' if val.sharpe_pass else 'FAIL'}] Sharpe >= 0.5",
-        f"  [{'PASS' if val.drawdown_pass else 'FAIL'}] Max DD <= 15%",
-        f"  [{'PASS' if val.profit_factor_pass else 'FAIL'}] Profit Factor >= 1.1",
-        f"  [{'PASS' if val.sufficient_data else 'FAIL'}] Sufficient Data (10+ cycles)",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "Go/No-Go Validation:",
+            f"  [{'PASS' if val.sharpe_pass else 'FAIL'}] Sharpe >= 0.5",
+            f"  [{'PASS' if val.drawdown_pass else 'FAIL'}] Max DD <= 15%",
+            f"  [{'PASS' if val.profit_factor_pass else 'FAIL'}] Profit Factor >= 1.1",
+            f"  [{'PASS' if val.sufficient_data else 'FAIL'}] Sufficient Data (10+ cycles)",
+            "",
+        ]
+    )
 
     overall = "GO" if val.all_pass else "NO-GO"
     lines.append(f"  Overall: {overall}")

@@ -7,6 +7,8 @@ import pyupbit
 
 from hedgefund.core.exceptions import DataProviderError, InsufficientDataError
 
+_API_TIMEOUT = 30  # seconds per API call
+
 # Upbit interval mapping
 _INTERVAL_MAP = {
     "day": "day",
@@ -58,7 +60,13 @@ class UpbitProvider:
             )
 
         try:
-            df = pyupbit.get_ohlcv(symbol, interval=upbit_interval, count=count)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    pyupbit.get_ohlcv, symbol, interval=upbit_interval, count=count
+                )
+                df = future.result(timeout=_API_TIMEOUT)
+        except FuturesTimeout:
+            raise DataProviderError(f"Upbit API timeout ({_API_TIMEOUT}s) for {symbol}")
         except Exception as e:
             raise DataProviderError(f"Upbit API error for {symbol}: {e}") from e
 
@@ -87,15 +95,17 @@ class UpbitProvider:
         filtered = df.loc[mask]
 
         if filtered.empty:
-            raise InsufficientDataError(
-                f"No data for {symbol} in range {start} ~ {end}"
-            )
+            raise InsufficientDataError(f"No data for {symbol} in range {start} ~ {end}")
         return filtered
 
     def get_available_symbols(self) -> list[str]:
         """Get KRW market tickers from Upbit."""
         try:
-            tickers = pyupbit.get_tickers(fiat="KRW")
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(pyupbit.get_tickers, fiat="KRW")
+                tickers = future.result(timeout=_API_TIMEOUT)
+        except FuturesTimeout:
+            raise DataProviderError(f"Upbit tickers API timeout ({_API_TIMEOUT}s)")
         except Exception as e:
             raise DataProviderError(f"Failed to get Upbit tickers: {e}") from e
 

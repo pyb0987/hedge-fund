@@ -31,8 +31,10 @@ def check_single_position_limit(
     """
     if portfolio_value <= 0:
         return LimitCheckResult(
-            passed=False, rule_name="single_position",
-            current_value=0.0, limit_value=config.max_single_position,
+            passed=False,
+            rule_name="single_position",
+            current_value=0.0,
+            limit_value=config.max_single_position,
             message="Portfolio value is zero or negative",
         )
 
@@ -58,8 +60,10 @@ def check_strategy_allocation_limit(
     """
     if portfolio_value <= 0:
         return LimitCheckResult(
-            passed=False, rule_name="strategy_allocation",
-            current_value=0.0, limit_value=config.max_strategy_allocation,
+            passed=False,
+            rule_name="strategy_allocation",
+            current_value=0.0,
+            limit_value=config.max_strategy_allocation,
             message="Portfolio value is zero or negative",
         )
 
@@ -98,7 +102,7 @@ def check_stop_loss(
 ) -> LimitCheckResult:
     """Check if a trade has hit stop-loss.
 
-    Rule: 3% per-trade loss → mechanical liquidation.
+    Rule: per-trade loss exceeds config threshold → mechanical liquidation.
     """
     loss = abs(min(0.0, trade_pnl_pct))
     passed = loss < config.per_trade_stop_loss
@@ -134,8 +138,10 @@ def check_symbol_aggregate_exposure(
     """
     if portfolio_value <= 0:
         return LimitCheckResult(
-            passed=False, rule_name="symbol_aggregate",
-            current_value=0.0, limit_value=config.max_symbol_exposure,
+            passed=False,
+            rule_name="symbol_aggregate",
+            current_value=0.0,
+            limit_value=config.max_symbol_exposure,
             message="Portfolio value is zero or negative",
         )
 
