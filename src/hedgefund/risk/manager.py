@@ -12,7 +12,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from hedgefund.config.schemas import RiskConfig
-from hedgefund.core.exceptions import DrawdownLimitError, OrderRejectedError
 from hedgefund.core.risk_metrics import value_at_risk
 from hedgefund.risk.drawdown import DrawdownState, get_drawdown_state
 from hedgefund.risk.limits import (
@@ -74,21 +73,34 @@ class RiskManager:
         checks: list[LimitCheckResult] = []
 
         # 1. Single position limit
-        checks.append(check_single_position_limit(
-            order_value, portfolio_value, self._config,
-        ))
+        checks.append(
+            check_single_position_limit(
+                order_value,
+                portfolio_value,
+                self._config,
+            )
+        )
 
         # 2. Strategy allocation limit (after order)
         new_strategy_value = strategy_total_value + order_value
-        checks.append(check_strategy_allocation_limit(
-            new_strategy_value, portfolio_value, self._config,
-        ))
+        checks.append(
+            check_strategy_allocation_limit(
+                new_strategy_value,
+                portfolio_value,
+                self._config,
+            )
+        )
 
         # 3. Cross-strategy symbol aggregate exposure
-        if symbol and symbol_total_value > 0:
-            checks.append(check_symbol_aggregate_exposure(
-                symbol, symbol_total_value + order_value, portfolio_value, self._config,
-            ))
+        if symbol:
+            checks.append(
+                check_symbol_aggregate_exposure(
+                    symbol,
+                    symbol_total_value + order_value,
+                    portfolio_value,
+                    self._config,
+                )
+            )
 
         # 4. Daily VaR
         if len(portfolio_returns) >= 20:
@@ -97,7 +109,9 @@ class RiskManager:
 
         # 4. Drawdown state
         dd_state = get_drawdown_state(
-            portfolio_value, self._peak_value, self._config.max_portfolio_drawdown,
+            portfolio_value,
+            self._peak_value,
+            self._config.max_portfolio_drawdown,
         )
 
         # Update peak
@@ -143,9 +157,13 @@ class RiskManager:
 
         for pos in positions:
             # Position size check
-            results.append(check_single_position_limit(
-                pos["value"], portfolio_value, self._config,
-            ))
+            results.append(
+                check_single_position_limit(
+                    pos["value"],
+                    portfolio_value,
+                    self._config,
+                )
+            )
 
             # Stop-loss check
             results.append(check_stop_loss(pos["pnl_pct"], self._config))
@@ -155,7 +173,9 @@ class RiskManager:
     def get_drawdown_state(self, portfolio_value: float) -> DrawdownState:
         """Get current drawdown state without modifying peak."""
         return get_drawdown_state(
-            portfolio_value, self._peak_value, self._config.max_portfolio_drawdown,
+            portfolio_value,
+            self._peak_value,
+            self._config.max_portfolio_drawdown,
         )
 
     def update_peak(self, portfolio_value: float) -> None:

@@ -1,5 +1,7 @@
 """Yahoo Finance data provider — fetches US ETF/stock OHLCV via yfinance."""
 
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta
 
 import pandas as pd

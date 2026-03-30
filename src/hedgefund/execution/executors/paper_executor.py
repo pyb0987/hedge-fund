@@ -4,7 +4,7 @@
 포지션/현금/거래 이력을 추적합니다.
 """
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from hedgefund.core.enums import Exchange, OrderSide, OrderStatus
@@ -65,8 +65,13 @@ class PaperExecutor:
         return list(self._trades)
 
     def set_prices(self, prices: dict[str, float]) -> None:
-        """Update simulated price feed."""
-        self._price_feed = dict(prices)
+        """Update simulated price feed (merge, not replace).
+
+        Preserves stale prices for symbols not in the update so that
+        positions still have a non-zero valuation when their exchange
+        is skipped (e.g. Alpaca on weekends).
+        """
+        self._price_feed.update(prices)
 
     def get_current_price(self, symbol: str) -> float:
         """Get simulated price."""
@@ -188,8 +193,7 @@ class PaperExecutor:
 
         # Compute total value
         position_value = sum(
-            pos.quantity * self.get_current_price(pos.symbol)
-            for pos in self._positions.values()
+            pos.quantity * self.get_current_price(pos.symbol) for pos in self._positions.values()
         )
 
         return AccountInfo(
@@ -219,16 +223,17 @@ class PaperExecutor:
         pos = self._positions.get((strategy_name, symbol))
         return pos.quantity if pos is not None else 0.0
 
-    def _update_position_buy(self, strategy_name: str, symbol: str, quantity: float, price: float) -> None:
+    def _update_position_buy(
+        self, strategy_name: str, symbol: str, quantity: float, price: float
+    ) -> None:
         """Update position after a buy (weighted average entry price)."""
         key = (strategy_name, symbol)
         existing = self._positions.get(key)
         if existing is not None:
             total_qty = existing.quantity + quantity
             avg_price = (
-                (existing.avg_entry_price * existing.quantity + price * quantity)
-                / total_qty
-            )
+                existing.avg_entry_price * existing.quantity + price * quantity
+            ) / total_qty
             self._positions[key] = PaperPosition(
                 symbol=symbol,
                 quantity=total_qty,

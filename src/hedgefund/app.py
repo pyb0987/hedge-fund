@@ -219,10 +219,15 @@ def run_once(
     # 7. Update executor prices
     for exchange_type, executor in executors.items():
         exchange_prices = {
-            sym: price for sym, price in collection.latest_prices.items()
+            sym: price
+            for sym, price in collection.latest_prices.items()
             if _symbol_exchange(sym) == exchange_type
         }
         executor.set_prices(exchange_prices)
+
+    # 7b. Backfill prices for positions not covered by active strategies
+    # (e.g. Alpaca positions on weekends when ETF strategies are skipped)
+    _backfill_position_prices(executors, providers)
 
     # 8. Capture rebalance decisions (before signals change strategy state)
     rebalance_decisions: dict[str, RebalanceDecision] = {}
@@ -249,8 +254,12 @@ def run_once(
         save_state(executors[Exchange.ALPACA], ALPACA_STATE)
         save_strategy_state(strategies, STRATEGY_STATE)
         _persist_cycle_data(
-            settings, cycle_result, executors, risk_manager,
-            strategies=strategies, collection=collection,
+            settings,
+            cycle_result,
+            executors,
+            risk_manager,
+            strategies=strategies,
+            collection=collection,
             rebalance_decisions=rebalance_decisions,
             dd_multiplier=dd_multiplier,
         )
@@ -278,11 +287,13 @@ def _send_telegram_notification(
     try:
         from hedgefund.monitoring.telegram import TelegramConfig, TelegramNotifier
 
-        notifier = TelegramNotifier(TelegramConfig(
-            bot_token=tg_config.bot_token,
-            chat_id=tg_config.chat_id,
-            enabled=True,
-        ))
+        notifier = TelegramNotifier(
+            TelegramConfig(
+                bot_token=tg_config.bot_token,
+                chat_id=tg_config.chat_id,
+                enabled=True,
+            )
+        )
         notifier.notify_cycle(
             timestamp=result.timestamp,
             signals=len(result.signals),
@@ -327,10 +338,7 @@ def _filter_strategies_for_market_hours(
     if _is_us_market_day(now):
         return strategies
 
-    active = {
-        name: s for name, s in strategies.items()
-        if s.exchange != Exchange.ALPACA
-    }
+    active = {name: s for name, s in strategies.items() if s.exchange != Exchange.ALPACA}
     skipped = set(strategies) - set(active)
     if skipped:
         logger.info("US market closed — skipping: %s", ", ".join(sorted(skipped)))
@@ -345,32 +353,85 @@ def _symbol_exchange(symbol: str) -> Exchange:
     return Exchange.ALPACA
 
 
+def _backfill_position_prices(
+    executors: dict[Exchange, PaperExecutor],
+    providers: dict[str, DataProvider],
+) -> None:
+    """Fetch prices for held positions that weren't covered by strategy data collection.
+
+    On weekends, Alpaca strategies are skipped so their symbols have no prices.
+    This ensures all positions are valued correctly for snapshots.
+    """
+    for executor in executors.values():
+        missing_symbols = [
+            sym for (_strat, sym) in executor.positions if executor.get_current_price(sym) <= 0
+        ]
+        if not missing_symbols:
+            continue
+
+        backfilled: dict[str, float] = {}
+        for sym in set(missing_symbols):
+            provider_key = "upbit" if sym.startswith("KRW-") else "yfinance"
+            provider = providers.get(provider_key)
+            if provider is None:
+                continue
+            try:
+                df = provider.get_ohlcv(sym, interval="day", count=1)
+                if not df.empty:
+                    backfilled[sym] = float(df["close"].iloc[-1])
+            except Exception as e:
+                logger.warning("Backfill price failed for %s: %s", sym, e)
+
+        if backfilled:
+            executor.set_prices(backfilled)
+            logger.info("Backfilled prices: %s", backfilled)
+
+
 def _log_cycle_result(
     result: CycleResult,
     executors: dict[Exchange, PaperExecutor],
 ) -> None:
     """Log human-readable cycle summary."""
-    logger.info("Signals: %d, Trades: %d, Risk blocked: %s",
-                len(result.signals), result.num_trades, result.risk_blocked)
+    logger.info(
+        "Signals: %d, Trades: %d, Risk blocked: %s",
+        len(result.signals),
+        result.num_trades,
+        result.risk_blocked,
+    )
 
     if result.risk_blocked:
         logger.warning("Risk reason: %s", result.risk_reason)
 
     for sig in result.signals:
-        logger.info("  Signal: %s %s %s strength=%.2f",
-                     sig.strategy_name, sig.symbol, sig.direction.value, sig.strength)
+        logger.info(
+            "  Signal: %s %s %s strength=%.2f",
+            sig.strategy_name,
+            sig.symbol,
+            sig.direction.value,
+            sig.strength,
+        )
 
     for ex in result.executions:
         status = "OK" if ex.success else "FAIL"
-        logger.info("  Exec: %s %s %s qty=%.4f price=%.2f cost=%.2f",
-                     status, ex.order.symbol, ex.order.side.value,
-                     ex.filled_quantity or 0, ex.filled_price or 0, ex.total_cost)
+        logger.info(
+            "  Exec: %s %s %s qty=%.4f price=%.2f cost=%.2f",
+            status,
+            ex.order.symbol,
+            ex.order.side.value,
+            ex.filled_quantity or 0,
+            ex.filled_price or 0,
+            ex.total_cost,
+        )
 
     for exchange_type, executor in executors.items():
         info = executor.get_account_info()
-        logger.info("  %s: cash=%.0f, total=%.0f, positions=%s",
-                     exchange_type.value, info.cash_balance, info.total_value,
-                     dict(info.positions))
+        logger.info(
+            "  %s: cash=%.0f, total=%.0f, positions=%s",
+            exchange_type.value,
+            info.cash_balance,
+            info.total_value,
+            dict(info.positions),
+        )
 
 
 def _persist_cycle_data(
@@ -433,12 +494,8 @@ def _persist_cycle_data(
                 )
 
         # C. Save portfolio snapshot with real drawdown
-        total_value = sum(
-            e.get_account_info().total_value for e in executors.values()
-        )
-        total_cash = sum(
-            e.get_account_info().cash_balance for e in executors.values()
-        )
+        total_value = sum(e.get_account_info().total_value for e in executors.values())
+        total_cash = sum(e.get_account_info().cash_balance for e in executors.values())
 
         dd_state = risk_manager.get_drawdown_state(total_value)
 
@@ -458,14 +515,23 @@ def _persist_cycle_data(
         # E. Save position snapshots (per-strategy attribution)
         if strategies is not None:
             _persist_position_snapshots(
-                store, result.timestamp, executors,
+                store,
+                result.timestamp,
+                executors,
             )
 
         # F. Save strategy decisions (rebalance gate + allocation audit)
         if strategies is not None and rebalance_decisions is not None:
+            actual_allocations = _compute_actual_allocations(executors, total_value)
             _persist_strategy_decisions(
-                store, result, strategies, settings.allocation,
-                rebalance_decisions, dd_multiplier, total_value,
+                store,
+                result,
+                strategies,
+                settings.allocation,
+                rebalance_decisions,
+                dd_multiplier,
+                total_value,
+                actual_allocations,
             )
 
         # G. Save OHLCV market data for post-hoc verification
@@ -492,10 +558,12 @@ def _find_trade_pnl(
 
     # Search executor's trade history for matching trade
     for trade in reversed(executor.trades):
-        if (trade.symbol == execution.order.symbol
-                and trade.strategy_name == execution.order.strategy_name
-                and trade.side == OrderSide.SELL
-                and trade.pnl is not None):
+        if (
+            trade.symbol == execution.order.symbol
+            and trade.strategy_name == execution.order.strategy_name
+            and trade.side == OrderSide.SELL
+            and trade.pnl is not None
+        ):
             return trade.pnl
 
     return None
@@ -562,6 +630,23 @@ def _persist_position_snapshots(
             )
 
 
+def _compute_actual_allocations(
+    executors: dict[Exchange, PaperExecutor],
+    total_value: float,
+) -> dict[str, float]:
+    """Compute actual allocation per strategy from executor positions."""
+    strategy_values: dict[str, float] = {}
+    for executor in executors.values():
+        for (strat_name, sym), pos in executor.positions.items():
+            market_price = executor.get_current_price(sym)
+            value = pos.quantity * market_price
+            strategy_values[strat_name] = strategy_values.get(strat_name, 0.0) + value
+
+    if total_value <= 0:
+        return {}
+    return {name: sv / total_value for name, sv in strategy_values.items()}
+
+
 def _persist_strategy_decisions(
     store: DataStore,
     result: CycleResult,
@@ -570,6 +655,7 @@ def _persist_strategy_decisions(
     rebalance_decisions: dict[str, RebalanceDecision],
     dd_multiplier: float,
     total_value: float,
+    actual_allocations: dict[str, float] | None = None,
 ) -> None:
     """Save rebalancing gate decisions and allocation audit trail."""
     # Count signals per strategy
@@ -586,6 +672,7 @@ def _persist_strategy_decisions(
 
         target_alloc = getattr(allocation, name, 0.0)
         n_signals = signals_per_strategy.get(name, 0)
+        actual_alloc = (actual_allocations or {}).get(name, 0.0)
 
         action = "rebalance" if decision.should_rebalance else "hold"
         if n_signals == 0 and decision.should_rebalance:
@@ -598,7 +685,7 @@ def _persist_strategy_decisions(
             reason=decision.reason,
             signals_generated=n_signals,
             target_allocation=target_alloc,
-            actual_allocation=0.0,  # computed from position_snapshots in report
+            actual_allocation=actual_alloc,
             dd_multiplier=dd_multiplier,
         )
 

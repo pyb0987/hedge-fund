@@ -19,11 +19,12 @@ from hedgefund.monitoring.paper_report import (
     analyze_performance,
     analyze_risk_compliance,
     analyze_signal_fidelity,
+    analyze_strategy_sharpes,
+    build_strategy_daily_returns,
     format_report,
     generate_report,
     validate,
 )
-
 
 # --- Signal Fidelity ---
 
@@ -67,10 +68,12 @@ class TestCostAnalysis:
         assert result.avg_cost_per_trade == 0.0
 
     def test_with_trades(self) -> None:
-        trades = pd.DataFrame({
-            "commission": [100, 200, 300],
-            "slippage": [10, 20, 30],
-        })
+        trades = pd.DataFrame(
+            {
+                "commission": [100, 200, 300],
+                "slippage": [10, 20, 30],
+            }
+        )
         result = analyze_costs(trades)
         assert result.total_commission == 600
         assert result.total_slippage == 60
@@ -144,11 +147,13 @@ class TestRiskCompliance:
 
     def test_with_risk_events(self) -> None:
         snapshots = pd.DataFrame({"drawdown": [0.01, 0.08]})
-        risk_events = pd.DataFrame({
-            "event_type": ["execution_failed", "cycle_blocked", "drawdown_check"],
-            "passed": [0, 0, 1],
-            "rule_name": ["order_rejected", "max_drawdown", "portfolio_drawdown"],
-        })
+        risk_events = pd.DataFrame(
+            {
+                "event_type": ["execution_failed", "cycle_blocked", "drawdown_check"],
+                "passed": [0, 0, 1],
+                "rule_name": ["order_rejected", "max_drawdown", "portfolio_drawdown"],
+            }
+        )
         result = analyze_risk_compliance(snapshots, risk_events)
         assert result.risk_rejections == 1
         assert result.cycles_blocked == 1
@@ -160,18 +165,30 @@ class TestRiskCompliance:
 class TestValidation:
     def test_all_pass(self) -> None:
         perf = PerformanceReport(
-            sharpe_ratio=1.0, sortino_ratio=1.5, max_drawdown=0.10,
-            profit_factor=1.5, annualized_return=0.15, win_rate=0.55,
-            total_return=0.10, num_cycles=20, insufficient_data=False,
+            sharpe_ratio=1.0,
+            sortino_ratio=1.5,
+            max_drawdown=0.10,
+            profit_factor=1.5,
+            annualized_return=0.15,
+            win_rate=0.55,
+            total_return=0.10,
+            num_cycles=20,
+            insufficient_data=False,
         )
         result = validate(perf)
         assert result.all_pass is True
 
     def test_sharpe_fail(self) -> None:
         perf = PerformanceReport(
-            sharpe_ratio=0.3, sortino_ratio=0.5, max_drawdown=0.10,
-            profit_factor=1.5, annualized_return=0.05, win_rate=0.45,
-            total_return=0.03, num_cycles=20, insufficient_data=False,
+            sharpe_ratio=0.3,
+            sortino_ratio=0.5,
+            max_drawdown=0.10,
+            profit_factor=1.5,
+            annualized_return=0.05,
+            win_rate=0.45,
+            total_return=0.03,
+            num_cycles=20,
+            insufficient_data=False,
         )
         result = validate(perf)
         assert result.sharpe_pass is False
@@ -179,9 +196,15 @@ class TestValidation:
 
     def test_drawdown_fail(self) -> None:
         perf = PerformanceReport(
-            sharpe_ratio=1.0, sortino_ratio=1.5, max_drawdown=0.20,
-            profit_factor=1.5, annualized_return=0.15, win_rate=0.55,
-            total_return=0.10, num_cycles=20, insufficient_data=False,
+            sharpe_ratio=1.0,
+            sortino_ratio=1.5,
+            max_drawdown=0.20,
+            profit_factor=1.5,
+            annualized_return=0.15,
+            win_rate=0.55,
+            total_return=0.10,
+            num_cycles=20,
+            insufficient_data=False,
         )
         result = validate(perf)
         assert result.drawdown_pass is False
@@ -189,13 +212,118 @@ class TestValidation:
 
     def test_insufficient_data_fails(self) -> None:
         perf = PerformanceReport(
-            sharpe_ratio=2.0, sortino_ratio=3.0, max_drawdown=0.05,
-            profit_factor=2.0, annualized_return=0.20, win_rate=0.60,
-            total_return=0.15, num_cycles=5, insufficient_data=True,
+            sharpe_ratio=2.0,
+            sortino_ratio=3.0,
+            max_drawdown=0.05,
+            profit_factor=2.0,
+            annualized_return=0.20,
+            win_rate=0.60,
+            total_return=0.15,
+            num_cycles=5,
+            insufficient_data=True,
         )
         result = validate(perf)
         assert result.sufficient_data is False
         assert result.all_pass is False
+
+
+# --- Strategy Daily Returns & Sharpe ---
+
+
+def _make_position_snapshots(
+    strategies: dict[str, list[float]],
+    start_date: datetime = datetime(2024, 1, 1),
+) -> pd.DataFrame:
+    """Helper: build position_snapshots DataFrame for testing."""
+    rows = []
+    for name, values in strategies.items():
+        for i, mv in enumerate(values):
+            rows.append(
+                {
+                    "timestamp": datetime(start_date.year, start_date.month, start_date.day + i),
+                    "strategy_name": name,
+                    "symbol": f"{name}_SYM",
+                    "exchange": "test",
+                    "quantity": 1.0,
+                    "avg_entry_price": 100.0,
+                    "market_price": mv,
+                    "market_value": mv,
+                    "unrealized_pnl": mv - 100.0,
+                }
+            )
+    df = pd.DataFrame(rows)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    return df.set_index("timestamp")
+
+
+class TestBuildStrategyDailyReturns:
+    def test_empty(self) -> None:
+        result = build_strategy_daily_returns(pd.DataFrame())
+        assert result == {}
+
+    def test_single_day_returns_empty(self) -> None:
+        df = _make_position_snapshots({"A": [100.0]})
+        result = build_strategy_daily_returns(df)
+        assert result == {}
+
+    def test_two_strategies(self) -> None:
+        df = _make_position_snapshots(
+            {
+                "crypto": [100.0, 110.0, 121.0],
+                "etf": [200.0, 198.0, 202.0],
+            }
+        )
+        result = build_strategy_daily_returns(df)
+        assert "crypto" in result
+        assert "etf" in result
+        # crypto: 10/100=0.1, 11/110=0.1 → 2 returns
+        assert len(result["crypto"]) == 2
+        assert result["crypto"][0] == pytest.approx(0.1)
+
+    def test_skips_zero_values(self) -> None:
+        """Strategy with gap (sold all, re-entered) computes returns only from nonzero days."""
+        df = _make_position_snapshots({"A": [100.0, 0.0, 0.0, 120.0, 126.0]})
+        result = build_strategy_daily_returns(df)
+        # nonzero: [100, 120, 126] → returns [0.2, 0.05]
+        assert len(result["A"]) == 2
+        assert result["A"][0] == pytest.approx(0.2)
+        assert result["A"][1] == pytest.approx(0.05)
+
+
+class TestAnalyzeStrategySharpes:
+    def test_empty(self) -> None:
+        result = analyze_strategy_sharpes({})
+        assert result == ()
+
+    def test_insufficient_data_zeroed(self) -> None:
+        """Strategies with < MIN_DAYS_FOR_ANNUALIZATION returns get zeroed metrics."""
+        returns = np.array([0.01, 0.02, 0.015, 0.005, 0.01])
+        result = analyze_strategy_sharpes({"crypto": returns})
+        assert len(result) == 1
+        assert result[0].strategy_name == "crypto"
+        assert result[0].sharpe_ratio == 0.0
+        assert result[0].num_days == 5
+
+    def test_sufficient_data(self) -> None:
+        """Strategies with >= MIN_DAYS_FOR_ANNUALIZATION returns get real metrics."""
+        rng = np.random.default_rng(42)
+        returns = rng.normal(0.001, 0.01, size=15)
+        result = analyze_strategy_sharpes({"crypto": returns})
+        assert len(result) == 1
+        assert result[0].sharpe_ratio != 0.0
+        assert result[0].num_days == 15
+
+    def test_multiple_strategies_sorted(self) -> None:
+        rng = np.random.default_rng(42)
+        result = analyze_strategy_sharpes(
+            {
+                "z_strat": rng.normal(0.001, 0.01, size=12),
+                "a_strat": rng.normal(0.001, 0.01, size=12),
+            }
+        )
+        assert len(result) == 2
+        assert result[0].strategy_name == "a_strat"
+        assert result[1].strategy_name == "z_strat"
 
 
 # --- Integration ---
@@ -256,7 +384,15 @@ class TestFormatReport:
             signal_fidelity=SignalFidelityReport(10, 8, 0.8),
             cost=CostReport(5000, 3000, 8000, 1000),
             performance=PerformanceReport(
-                1.2, 1.5, 0.08, 1.8, 0.15, 0.55, 0.10, 50, False,
+                1.2,
+                1.5,
+                0.08,
+                1.8,
+                0.15,
+                0.55,
+                0.10,
+                50,
+                False,
             ),
             risk_compliance=RiskComplianceReport(0.08, 3, 0, 0),
             strategy_performance=(),
@@ -280,7 +416,15 @@ class TestFormatReport:
             signal_fidelity=SignalFidelityReport(5, 2, 0.4),
             cost=CostReport(1000, 500, 1500, 750),
             performance=PerformanceReport(
-                0.3, 0.4, 0.18, 0.9, 0.05, 0.40, -0.02, 8, True,
+                0.3,
+                0.4,
+                0.18,
+                0.9,
+                0.05,
+                0.40,
+                -0.02,
+                8,
+                True,
             ),
             risk_compliance=RiskComplianceReport(0.18, 5, 2, 1),
             strategy_performance=(),

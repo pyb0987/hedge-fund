@@ -151,7 +151,7 @@ $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스
 | 패키지 관리 | uv + hatchling |
 | 거래소 SDK | pyupbit (Upbit), alpaca-trade-api (Alpaca) |
 | 데이터 | yfinance (ETF), pyupbit (암호화폐) |
-| 검증 | pydantic (설정), pytest (456 tests, 89% coverage) |
+| 검증 | pydantic (설정), pytest (464 tests, 89% coverage) |
 | 저장소 | SQLite |
 | 스케줄링 | launchd (macOS) |
 | 로깅 | structlog |
@@ -216,7 +216,7 @@ hedge-fund/
 │   ├── backtest/              # 벡터화 백테스트 + Walk-Forward + Deflated Sharpe
 │   ├── monitoring/            # Paper trading 리포트 + Telegram 알림
 │   └── scheduler/             # launchd 기반 일일 스케줄러
-└── tests/                     # 456 tests (unit + architecture)
+└── tests/                     # 464 tests (unit + architecture)
 ```
 
 ---

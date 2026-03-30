@@ -11,17 +11,17 @@ run_cycle 오케스트레이터:
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 
-from hedgefund.config.schemas import AllocationConfig, GlobalSettings, RiskConfig
+from hedgefund.config.schemas import AllocationConfig, RiskConfig
 from hedgefund.core.enums import Exchange, SignalDirection
 from hedgefund.core.models import Signal
 from hedgefund.execution.order_builder import build_orders_from_signals
-from hedgefund.execution.protocols import AccountInfo, ExecutionResult, Executor
+from hedgefund.execution.protocols import ExecutionResult, Executor
 from hedgefund.risk.manager import RiskManager
 from hedgefund.strategies.base import Strategy
 
@@ -104,7 +104,9 @@ class PortfolioManager:
 
         dd_state = self._risk_manager.get_drawdown_state(total_value)
         if dd_state.is_max_breached:
-            logger.warning("Max drawdown breached: %.1f%% — blocking all trades", dd_state.drawdown * 100)
+            logger.warning(
+                "Max drawdown breached: %.1f%% — blocking all trades", dd_state.drawdown * 100
+            )
             result = CycleResult(
                 timestamp=now,
                 signals=(),
@@ -163,9 +165,8 @@ class PortfolioManager:
             # Pre-fetch account info for live executor fallback (avoids N+1 calls)
             first_exchange = strat_sigs[0].exchange if strat_sigs else None
             strat_executor = self._executors.get(first_exchange) if first_exchange else None
-            use_strategy_positions = (
-                strat_executor is not None
-                and hasattr(strat_executor, "get_strategy_position_quantity")
+            use_strategy_positions = strat_executor is not None and hasattr(
+                strat_executor, "get_strategy_position_quantity"
             )
             fallback_account_info = (
                 strat_executor.get_account_info()
@@ -185,42 +186,54 @@ class PortfolioManager:
                 # Get strategy-scoped position quantity
                 if use_strategy_positions:
                     strat_positions[signal.symbol] = strat_executor.get_strategy_position_quantity(  # type: ignore[union-attr]
-                        strat_name, signal.symbol,
+                        strat_name,
+                        signal.symbol,
                     )
                 elif fallback_account_info is not None:
                     strat_positions[signal.symbol] = fallback_account_info.positions.get(
-                        signal.symbol, 0.0,
+                        signal.symbol,
+                        0.0,
                     )
                 else:
                     strat_positions[signal.symbol] = 0.0
 
             strat_orders = build_orders_from_signals(
-                strat_sigs, prices, strat_targets, strat_positions,
+                strat_sigs,
+                prices,
+                strat_targets,
+                strat_positions,
             )
             orders.extend(strat_orders)
 
         # Step 6: Pre-trade risk check per order
         for order in orders:
             strategy_total = self._get_strategy_total_value(order.strategy_name)
+            symbol_total = self._get_symbol_total_value(order.symbol)
             report = self._risk_manager.pre_trade_check(
                 order_value=order.quantity * (order.price or 0),
                 strategy_total_value=strategy_total,
                 portfolio_value=total_value,
                 portfolio_returns=portfolio_returns,
                 timestamp=now,
+                symbol=order.symbol,
+                symbol_total_value=symbol_total,
             )
 
             if not report.all_passed:
                 logger.warning(
                     "Risk check failed for %s %s: %s",
-                    order.symbol, order.side.value, report.blocked_reason,
+                    order.symbol,
+                    order.side.value,
+                    report.blocked_reason,
                 )
                 # Record rejected execution for audit trail
-                all_executions.append(ExecutionResult(
-                    order=order,
-                    success=False,
-                    error_message=f"Risk rejected: {report.blocked_reason}",
-                ))
+                all_executions.append(
+                    ExecutionResult(
+                        order=order,
+                        success=False,
+                        error_message=f"Risk rejected: {report.blocked_reason}",
+                    )
+                )
                 continue
 
             # Step 7: Execute
@@ -236,7 +249,8 @@ class PortfolioManager:
                 if exec_result.success:
                     logger.info(
                         "Executed: %s %s %.4f @ %.2f (cost: %.2f)",
-                        order.side.value, order.symbol,
+                        order.side.value,
+                        order.symbol,
                         exec_result.filled_quantity or 0,
                         exec_result.filled_price or 0,
                         exec_result.total_cost,
@@ -244,8 +258,11 @@ class PortfolioManager:
             except Exception:
                 logger.exception("Execution failed for %s", order.symbol)
 
-        # Step 8: Update state
+        # Step 8: Post-trade risk check
         new_total_value = self._get_total_portfolio_value()
+        self._run_post_trade_check(new_total_value, now)
+
+        # Step 9: Update state
         self._risk_manager.update_peak(new_total_value)
 
         if total_value > 0:
@@ -336,3 +353,45 @@ class PortfolioManager:
                 total += qty * price
 
         return total
+
+    def _get_symbol_total_value(self, symbol: str) -> float:
+        """Get total value of a symbol across all executors (cross-strategy)."""
+        total = 0.0
+        for executor in self._executors.values():
+            info = executor.get_account_info()
+            qty = info.positions.get(symbol, 0.0)
+            if qty > 0:
+                price = executor.get_current_price(symbol)
+                total += qty * price
+        return total
+
+    def _run_post_trade_check(self, portfolio_value: float, timestamp: datetime) -> None:
+        """Run post-trade risk checks and log violations."""
+        positions: list[dict] = []
+        for executor in self._executors.values():
+            if hasattr(executor, "positions"):
+                for (_strat, sym), pos in executor.positions.items():
+                    price = executor.get_current_price(sym)
+                    value = pos.quantity * price
+                    pnl_pct = (
+                        (price - pos.avg_entry_price) / pos.avg_entry_price
+                        if pos.avg_entry_price > 0
+                        else 0.0
+                    )
+                    positions.append({"value": value, "strategy": _strat, "pnl_pct": pnl_pct})
+            else:
+                info = executor.get_account_info()
+                for sym, qty in info.positions.items():
+                    if qty > 0:
+                        price = executor.get_current_price(sym)
+                        positions.append(
+                            {"value": qty * price, "strategy": "unknown", "pnl_pct": 0.0}
+                        )
+
+        if not positions:
+            return
+
+        results = self._risk_manager.post_trade_check(positions, portfolio_value, timestamp)
+        for check in results:
+            if not check.passed:
+                logger.warning("Post-trade violation: %s", check.message)

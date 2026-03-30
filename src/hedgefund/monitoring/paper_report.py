@@ -16,9 +16,11 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 from hedgefund.core import risk_metrics
 from hedgefund.data.store import DataStore
+from hedgefund.portfolio.correlation import CorrelationReport, analyze_correlations
 
 # --- Report data structures ---
 
@@ -114,6 +116,17 @@ class HoldingPeriodReport:
 
 
 @dataclass(frozen=True)
+class StrategySharpeReport:
+    """Per-strategy risk-adjusted metrics from daily return series."""
+
+    strategy_name: str
+    sharpe_ratio: float
+    annualized_return: float
+    annualized_volatility: float
+    num_days: int
+
+
+@dataclass(frozen=True)
 class ValidationResult:
     """Go/No-Go decision."""
 
@@ -139,6 +152,8 @@ class PaperReport:
     generated_at: datetime
     data_start: datetime | None
     data_end: datetime | None
+    strategy_sharpes: tuple[StrategySharpeReport, ...] = ()
+    correlation: CorrelationReport | None = None
 
 
 # --- Analysis functions ---
@@ -213,8 +228,11 @@ def analyze_performance(
     values = snapshots_df["total_value"].values.astype(np.float64)
     returns = np.diff(values) / values[:-1]
 
-    # Remove NaN/inf
+    # Remove NaN/inf and structural outliers (e.g. weekend price feed gaps
+    # causing >20% single-day swings that aren't real market moves)
+    MAX_DAILY_RETURN = 0.20
     returns = returns[np.isfinite(returns)]
+    returns = returns[np.abs(returns) <= MAX_DAILY_RETURN]
     n = len(returns)
 
     if n < 2:
@@ -223,12 +241,30 @@ def analyze_performance(
     insufficient = n < thresholds.min_cycles
     total_return = float((values[-1] / values[0]) - 1.0) if values[0] > 0 else 0.0
 
+    # Use RiskManager's recorded drawdown (from snapshot column) rather than
+    # recomputing from returns — the returns-based calc breaks when weekend
+    # filtering causes structural total_value jumps.
+    if "drawdown" in snapshots_df.columns:
+        max_dd = float(snapshots_df["drawdown"].max())
+    else:
+        max_dd = risk_metrics.max_drawdown(returns)
+
+    # Guard annualized metrics against tiny sample sizes (exponent explosion)
+    if n >= MIN_DAYS_FOR_ANNUALIZATION:
+        sharpe = risk_metrics.sharpe_ratio(returns)
+        sortino = risk_metrics.sortino_ratio(returns)
+        ann_ret = risk_metrics.annualized_return(returns)
+    else:
+        sharpe = 0.0
+        sortino = 0.0
+        ann_ret = 0.0
+
     return PerformanceReport(
-        sharpe_ratio=risk_metrics.sharpe_ratio(returns),
-        sortino_ratio=risk_metrics.sortino_ratio(returns),
-        max_drawdown=risk_metrics.max_drawdown(returns),
+        sharpe_ratio=sharpe,
+        sortino_ratio=sortino,
+        max_drawdown=max_dd,
         profit_factor=risk_metrics.profit_factor(returns),
-        annualized_return=risk_metrics.annualized_return(returns),
+        annualized_return=ann_ret,
         win_rate=risk_metrics.win_rate(returns),
         total_return=total_return,
         num_cycles=n,
@@ -417,6 +453,77 @@ def _compute_avg_holding_days(strat_df: pd.DataFrame) -> float:
     return float(np.mean(days)) if days else 0.0
 
 
+def build_strategy_daily_returns(
+    position_snapshots_df: pd.DataFrame,
+) -> dict[str, NDArray[np.float64]]:
+    """Build daily return series per strategy from position snapshots.
+
+    Groups market_value by (date, strategy_name), then computes daily
+    pct_change for consecutive days where the strategy held positions.
+    """
+    if position_snapshots_df.empty:
+        return {}
+
+    df = position_snapshots_df.copy()
+    df["date"] = pd.to_datetime(df.index).normalize()
+
+    # Sum market_value per (date, strategy)
+    daily = df.groupby(["date", "strategy_name"])["market_value"].sum()
+    daily = daily.unstack(level="strategy_name", fill_value=0.0)
+
+    strategy_returns: dict[str, NDArray[np.float64]] = {}
+    for name in sorted(daily.columns):
+        values = daily[name].values.astype(np.float64)
+        nonzero = values > 0
+        if nonzero.sum() < 2:
+            continue
+        nz_values = values[nonzero]
+        returns = np.diff(nz_values) / nz_values[:-1]
+        returns = returns[np.isfinite(returns)]
+        if len(returns) > 0:
+            strategy_returns[name] = returns
+
+    return strategy_returns
+
+
+MIN_DAYS_FOR_ANNUALIZATION = 10  # Below this, annualization exponent explodes
+
+
+def analyze_strategy_sharpes(
+    strategy_returns: dict[str, NDArray[np.float64]],
+) -> tuple[StrategySharpeReport, ...]:
+    """Compute per-strategy Sharpe and volatility from daily returns."""
+    if not strategy_returns:
+        return ()
+
+    reports: list[StrategySharpeReport] = []
+    for name in sorted(strategy_returns.keys()):
+        returns = strategy_returns[name]
+        n = len(returns)
+        if n < MIN_DAYS_FOR_ANNUALIZATION:
+            # Too few data points — annualization would be misleading
+            reports.append(
+                StrategySharpeReport(
+                    strategy_name=name,
+                    sharpe_ratio=0.0,
+                    annualized_return=0.0,
+                    annualized_volatility=0.0,
+                    num_days=n,
+                )
+            )
+            continue
+        reports.append(
+            StrategySharpeReport(
+                strategy_name=name,
+                sharpe_ratio=risk_metrics.sharpe_ratio(returns),
+                annualized_return=risk_metrics.annualized_return(returns),
+                annualized_volatility=risk_metrics.annualized_volatility(returns),
+                num_days=n,
+            )
+        )
+    return tuple(reports)
+
+
 def validate(
     performance: PerformanceReport,
     thresholds: ReportThresholds = ReportThresholds(),
@@ -457,6 +564,11 @@ def generate_report(
     strategy_perf = analyze_strategy_performance(position_snapshots_df, trades_df)
     rebalancing_gates = analyze_rebalancing_gates(decisions_df)
     holding_periods = analyze_holding_periods(position_snapshots_df)
+    strategy_returns = build_strategy_daily_returns(position_snapshots_df)
+    strategy_sharpes = analyze_strategy_sharpes(strategy_returns)
+    correlation_report = (
+        analyze_correlations(strategy_returns) if len(strategy_returns) >= 2 else None
+    )
     validation_result = validate(performance, thresholds)
 
     # Determine data range
@@ -478,6 +590,8 @@ def generate_report(
         generated_at=now,
         data_start=data_start,
         data_end=data_end,
+        strategy_sharpes=strategy_sharpes,
+        correlation=correlation_report,
     )
 
 
@@ -552,6 +666,42 @@ def format_report(report: PaperReport) -> str:
                     f"Commission: {sp.total_commission:,.0f}",
                 ]
             )
+            if sp.num_positions > 0 and sp.total_value == 0.0:
+                lines.append("    WARNING: positions exist but market_value=0 (price feed gap)")
+
+    # Per-strategy Sharpe ratios
+    if report.strategy_sharpes:
+        lines.extend(["", "Per-Strategy Sharpe:"])
+        for ss in report.strategy_sharpes:
+            if ss.num_days < MIN_DAYS_FOR_ANNUALIZATION:
+                lines.append(
+                    f"  [{ss.strategy_name}] "
+                    f"insufficient data (n={ss.num_days}, need {MIN_DAYS_FOR_ANNUALIZATION}+)"
+                )
+            else:
+                lines.append(
+                    f"  [{ss.strategy_name}] "
+                    f"Sharpe={ss.sharpe_ratio:+.2f}  "
+                    f"Return={ss.annualized_return:.1%}  "
+                    f"Vol={ss.annualized_volatility:.1%}  "
+                    f"(n={ss.num_days})"
+                )
+
+    # Strategy correlation
+    if report.correlation is not None:
+        corr = report.correlation
+        status = "YES" if corr.is_diversified else "NO"
+        lines.extend(["", "Strategy Correlation:"])
+        lines.append(f"  Diversified: {status}  (max |corr| = {corr.max_off_diagonal:.2f})")
+        n = len(corr.strategy_names)
+        for i in range(n):
+            for j in range(i + 1, n):
+                lines.append(
+                    f"    {corr.strategy_names[i]} <> {corr.strategy_names[j]}: "
+                    f"{corr.correlation_matrix[i][j]:+.2f}"
+                )
+        for w in corr.warnings:
+            lines.append(f"  {w}")
 
     # Rebalancing gate audit
     if report.rebalancing_gates:

@@ -1,13 +1,22 @@
 """Upbit data provider — fetches KRW crypto OHLCV via pyupbit."""
 
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime
 
 import pandas as pd
 import pyupbit
+import requests
 
 from hedgefund.core.exceptions import DataProviderError, InsufficientDataError
 
+logger = logging.getLogger(__name__)
+
 _API_TIMEOUT = 30  # seconds per API call
+_RATE_LIMIT_DELAY = 0.15  # seconds between API calls (Upbit ~10 req/s)
+_MAX_RETRIES = 3
 
 # Upbit interval mapping
 _INTERVAL_MAP = {
@@ -59,16 +68,32 @@ class UpbitProvider:
                 f"Unsupported interval '{interval}'. Supported: {list(_INTERVAL_MAP.keys())}"
             )
 
-        try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    pyupbit.get_ohlcv, symbol, interval=upbit_interval, count=count
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                time.sleep(_RATE_LIMIT_DELAY)
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        pyupbit.get_ohlcv, symbol, interval=upbit_interval, count=count
+                    )
+                    df = future.result(timeout=_API_TIMEOUT)
+            except FuturesTimeout:
+                raise DataProviderError(f"Upbit API timeout ({_API_TIMEOUT}s) for {symbol}")
+            except Exception as e:
+                raise DataProviderError(f"Upbit API error for {symbol}: {e}") from e
+
+            if df is not None and not df.empty:
+                break
+
+            if attempt < _MAX_RETRIES:
+                wait = attempt * 0.5
+                logger.warning(
+                    "Upbit retry %d/%d for %s (wait %.1fs)",
+                    attempt,
+                    _MAX_RETRIES,
+                    symbol,
+                    wait,
                 )
-                df = future.result(timeout=_API_TIMEOUT)
-        except FuturesTimeout:
-            raise DataProviderError(f"Upbit API timeout ({_API_TIMEOUT}s) for {symbol}")
-        except Exception as e:
-            raise DataProviderError(f"Upbit API error for {symbol}: {e}") from e
+                time.sleep(wait)
 
         if df is None or df.empty:
             raise InsufficientDataError(f"No data returned for {symbol} from Upbit")
@@ -116,19 +141,30 @@ class UpbitProvider:
     def get_top_volume_symbols(self, top_n: int = 15) -> list[str]:
         """Get top N symbols by 24h KRW trading volume.
 
-        Useful for crypto momentum universe selection.
+        Upbit ticker API로 1회 호출하여 전체 거래대금을 조회합니다.
+        기존: 243개 심볼 × get_ohlcv → rate limit 초과
+        개선: /v1/ticker 1회 호출 → acc_trade_price_24h로 정렬
         """
         symbols = self.get_available_symbols()
-        volumes: list[tuple[str, float]] = []
+        if not symbols:
+            return []
 
-        for sym in symbols:
-            try:
-                df = self.get_ohlcv(sym, interval="day", count=1)
-                if not df.empty:
-                    vol = float(df["close"].iloc[-1] * df["volume"].iloc[-1])
-                    volumes.append((sym, vol))
-            except (DataProviderError, InsufficientDataError):
-                continue
+        try:
+            resp = requests.get(
+                "https://api.upbit.com/v1/ticker",
+                params={"markets": ",".join(symbols)},
+                timeout=_API_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("Upbit ticker API failed, falling back to empty: %s", e)
+            return []
 
+        volumes = [
+            (item["market"], item.get("acc_trade_price_24h", 0))
+            for item in data
+            if item.get("market", "").startswith("KRW-")
+        ]
         volumes.sort(key=lambda x: x[1], reverse=True)
         return [sym for sym, _ in volumes[:top_n]]

@@ -78,7 +78,7 @@ ALLOWED_DEPS: dict[str, set[str]] = {
     "strategies": {"core", "config"},
     "backtest": {"core"},
     "portfolio": {"core", "strategies", "execution", "risk", "config", "data"},
-    "monitoring": {"core", "data", "config", "execution", "strategies", "risk"},
+    "monitoring": {"core", "data", "config", "execution", "strategies", "risk", "portfolio"},
     "scheduler": {
         "core",
         "config",
