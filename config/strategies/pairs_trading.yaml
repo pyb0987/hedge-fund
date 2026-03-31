@@ -1,0 +1,29 @@
+name: pairs_trading
+exchange: alpaca
+market: US
+rebalance_frequency: weekly
+
+parameters:
+  lookback_days: 60
+  holding_days: 5
+  zscore_entry: 2.0
+  zscore_exit: 0.5
+  hedge_ratio_window: 60
+
+# Cointegrated ETF pairs (domain knowledge)
+# GLD/GDX: gold spot vs gold miners
+# XLE/USO: energy sector vs crude oil
+# TLT/IEF: long-term vs intermediate treasury
+pairs:
+  - GLD,GDX
+  - XLE,USO
+  - TLT,IEF
+
+costs:
+  commission_rate: 0.0
+  slippage_rate: 0.001
+
+validation:
+  min_sharpe: 0.8
+  max_drawdown: 0.20
+  min_profit_factor: 1.3

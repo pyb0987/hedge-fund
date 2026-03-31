@@ -41,6 +41,7 @@ class AllocationConfig(BaseModel):
     market_hedge: float = Field(default=0.0, ge=0.0, le=1.0)
     treasury_park: float = Field(default=0.45, ge=0.0, le=1.0)
     sector_momentum: float = Field(default=0.0, ge=0.0, le=1.0)
+    pairs_trading: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def allocations_sum_at_most_one(self) -> "AllocationConfig":
@@ -51,6 +52,7 @@ class AllocationConfig(BaseModel):
             + self.market_hedge
             + self.treasury_park
             + self.sector_momentum
+            + self.pairs_trading
         )
         if total > 1.01:
             msg = f"Allocations must sum to ≤ 1.0, got {total:.3f}"
@@ -254,6 +256,48 @@ class TreasuryParkConfig(BaseModel):
 
     costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.0001)
     validation: ValidationConfig = ValidationConfig()
+
+
+class PairsTradingConfig(BaseModel):
+    """Strategy: ETF Pairs Trading (market-neutral alpha)."""
+
+    name: str = "pairs_trading"
+    exchange: str = "alpaca"
+    market: str = "US"
+    rebalance_frequency: RebalanceFrequency = RebalanceFrequency.WEEKLY
+
+    lookback_days: int = Field(default=60, ge=20, le=252)
+    holding_days: int = Field(default=5, ge=1, le=30)
+    zscore_entry: float = Field(default=2.0, ge=1.0, le=4.0)
+    zscore_exit: float = Field(default=0.5, ge=0.0, le=2.0)
+    hedge_ratio_window: int = Field(default=60, ge=20, le=252)
+
+    # Predefined cointegrated pairs: "SYMBOL_A,SYMBOL_B"
+    pairs: list[str] = Field(
+        default=["GLD,GDX", "XLE,USO", "TLT,IEF"],
+        description="Comma-separated pair strings, e.g. 'GLD,GDX'",
+    )
+
+    costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.001)
+    validation: ValidationConfig = ValidationConfig()
+
+    @field_validator("pairs")
+    @classmethod
+    def validate_pairs_format(cls, v: list[str]) -> list[str]:
+        for pair_str in v:
+            parts = pair_str.split(",")
+            if len(parts) != 2 or not all(p.strip() for p in parts):
+                msg = f"Each pair must be 'SYMBOL_A,SYMBOL_B', got '{pair_str}'"
+                raise ValueError(msg)
+        return v
+
+    def parsed_pairs(self) -> list[tuple[str, str]]:
+        """Return pairs as list of (symbol_a, symbol_b) tuples."""
+        result = []
+        for pair_str in self.pairs:
+            a, b = pair_str.split(",")
+            result.append((a.strip(), b.strip()))
+        return result
 
 
 class MarketHedgeConfig(BaseModel):

@@ -21,6 +21,8 @@
 - `backtest_weights()`와 `generate_signals()`는 반드시 동일한 수학 함수 사용 (EP1 data leakage, EP2 z-score 불일치 — 2회 CRITICAL)
 - `generate_signals()`에 리밸런싱 게이트 필수: crypto=holding_days, dual=monthly rebalance_day, market_hedge=holding_days (EP3 daily rebalancing 재발 방지)
 - ETF Mean Reversion은 z-score 임계치 기반이므로 리밸런싱 게이트 불필요 (매일 체크가 정상)
+- Pairs Trading: `_compute_spread_zscore()`가 generate_signals + backtest_weights 공유 (동일 수학 함수 원칙)
+- Backtest engine은 음수 weight 지원 (short leg = negative weight, long leg = positive weight)
 
 ## Conventions
 - 한국어 설명, 영어 코드/변수명
@@ -47,6 +49,7 @@
 | dual_momentum | 15% | Both | Long + 방어 바스켓 | 교차자산 모멘텀 |
 | market_hedge | 0% (NO-GO) | Alpaca | 비활성 | SPY+SH 충돌 |
 | treasury_park | 45% | Alpaca | BIL 상시 홀딩 | 유휴 현금 → 무위험 수익 |
+| pairs_trading | 0% (조건부) | Alpaca | Long-short 쌍 | market-neutral alpha (WF 검증 후 활성화) |
 | sector_momentum | 0% (조건부) | Alpaca | Long-only 섹터 ETF | optimize로 검증 후 활성화 |
 | 현금 버퍼 | 10% | - | - | 긴급 리밸런싱 여유 |
 
@@ -57,7 +60,7 @@
 ## Key Paths
 - Config: `config/settings.yaml`, `config/strategies/*.yaml`
 - Core: `src/hedgefund/core/` (models, enums, exceptions, risk_metrics, kelly)
-- Strategies: `src/hedgefund/strategies/` (base, crypto_momentum, etf_mean_reversion, dual_momentum, market_hedge, treasury_park, sector_momentum, registry)
+- Strategies: `src/hedgefund/strategies/` (base, crypto_momentum, etf_mean_reversion, dual_momentum, market_hedge, treasury_park, sector_momentum, pairs_trading, registry)
 - Backtest: `src/hedgefund/backtest/` (engine, walk_forward, metrics, deflated_sharpe)
 - Risk: `src/hedgefund/risk/` (manager, limits, drawdown, position_sizer)
 - Portfolio: `src/hedgefund/portfolio/` (manager, allocator, correlation, rebalancer)
@@ -69,6 +72,8 @@
 - **Hooks**: `.claude/hooks/` — auto-format(ruff), file-protection(.env/paper_state), stop-test-verification, desktop-notification
 - **Slash Commands**: `/validate`, `/paper-check`, `/entropy-check`, `/risk-audit`, `/strategy-review`
 - **Architecture Tests**: `tests/test_architecture.py` — dependency layering, frozen dataclass, Strategy Protocol, file size, circular import, risk config, Executor Protocol (기계적 강제)
+- **Trace Filesystem**: `.claude/traces/` — 진화 이력(evolution/), 실패 진단(failures/), 실험(experiments/) raw context 보존
+- **변경 전략**: Additive first → Subtractive → Structural (한 번에 하나, 교란 변수 격리)
 - **Protected Files**: .env*, data/paper_state/*, data/hedgefund.db (에이전트 수정 차단)
 - **Warning Files**: config/settings.yaml, pyproject.toml (수정 허용하되 경고)
 

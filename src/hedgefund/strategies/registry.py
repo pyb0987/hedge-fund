@@ -7,6 +7,7 @@ from hedgefund.config.schemas import (
     DualMomentumConfig,
     EtfMeanReversionConfig,
     MarketHedgeConfig,
+    PairsTradingConfig,
     SectorMomentumConfig,
     TreasuryParkConfig,
 )
@@ -16,6 +17,7 @@ from hedgefund.strategies.crypto_momentum import CryptoMomentumStrategy
 from hedgefund.strategies.dual_momentum import DualMomentumStrategy
 from hedgefund.strategies.etf_mean_reversion import EtfMeanReversionStrategy
 from hedgefund.strategies.market_hedge import MarketHedgeStrategy
+from hedgefund.strategies.pairs_trading import PairsTradingStrategy
 from hedgefund.strategies.sector_momentum import SectorMomentumStrategy
 from hedgefund.strategies.treasury_park import TreasuryParkStrategy
 
@@ -27,6 +29,7 @@ _REGISTRY: dict[str, tuple[type, type]] = {
     "market_hedge": (MarketHedgeStrategy, MarketHedgeConfig),
     "treasury_park": (TreasuryParkStrategy, TreasuryParkConfig),
     "sector_momentum": (SectorMomentumStrategy, SectorMomentumConfig),
+    "pairs_trading": (PairsTradingStrategy, PairsTradingConfig),
 }
 
 
