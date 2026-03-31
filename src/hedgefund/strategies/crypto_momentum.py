@@ -36,8 +36,12 @@ class CryptoMomentumStrategy(BaseStrategy):
     def config(self) -> CryptoMomentumConfig:
         return self._config
 
+    # Default backtest universe: top Upbit KRW coins by market cap
+    _BACKTEST_UNIVERSE = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA"]
+
     def get_universe(self) -> list[str]:
-        return list(self._universe)
+        # Runtime universe from Upbit API; fall back to defaults for backtest
+        return list(self._universe) if self._universe else list(self._BACKTEST_UNIVERSE)
 
     def set_universe(self, symbols: list[str]) -> None:
         """Update the tradeable universe (e.g., from top volume filter).
@@ -68,7 +72,9 @@ class CryptoMomentumStrategy(BaseStrategy):
 
     def get_rebalance_decision(self, timestamp: datetime) -> RebalanceDecision:
         return self._holding_day_rebalance_decision(
-            timestamp, self._last_rebalance_date, self._config.holding_days,
+            timestamp,
+            self._last_rebalance_date,
+            self._config.holding_days,
         )
 
     def generate_signals(
@@ -109,38 +115,42 @@ class CryptoMomentumStrategy(BaseStrategy):
             if i < top_n and score > 0:
                 # Long signal — only buy positive momentum
                 strength = self._normalize_strength(score, ranked)
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=self.exchange,
-                    direction=SignalDirection.LONG,
-                    strength=strength,
-                    timestamp=timestamp,
-                    metadata={
-                        "momentum_score": score,
-                        "rank": float(i + 1),
-                        "top_n": float(top_n),
-                        "lookback_days": float(self._config.lookback_days),
-                        "threshold": 0.0,  # momentum > 0
-                    },
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=self.exchange,
+                        direction=SignalDirection.LONG,
+                        strength=strength,
+                        timestamp=timestamp,
+                        metadata={
+                            "momentum_score": score,
+                            "rank": float(i + 1),
+                            "top_n": float(top_n),
+                            "lookback_days": float(self._config.lookback_days),
+                            "threshold": 0.0,  # momentum > 0
+                        },
+                    )
+                )
             else:
                 # Flat — sell or stay out
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=self.exchange,
-                    direction=SignalDirection.FLAT,
-                    strength=0.0,
-                    timestamp=timestamp,
-                    metadata={
-                        "momentum_score": score,
-                        "rank": float(i + 1),
-                        "top_n": float(top_n),
-                        "lookback_days": float(self._config.lookback_days),
-                        "threshold": 0.0,
-                    },
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=self.exchange,
+                        direction=SignalDirection.FLAT,
+                        strength=0.0,
+                        timestamp=timestamp,
+                        metadata={
+                            "momentum_score": score,
+                            "rank": float(i + 1),
+                            "top_n": float(top_n),
+                            "lookback_days": float(self._config.lookback_days),
+                            "threshold": 0.0,
+                        },
+                    )
+                )
 
         # Mark rebalance date for holding_days gate
         if signals:
