@@ -21,7 +21,9 @@ class BacktestableStrategy(Protocol):
     def get_universe(self) -> list[str]: ...
 
     def backtest_weights(
-        self, data: dict[str, pd.DataFrame], dates: pd.DatetimeIndex,
+        self,
+        data: dict[str, pd.DataFrame],
+        dates: pd.DatetimeIndex,
     ) -> pd.DataFrame: ...
 
 
@@ -64,11 +66,17 @@ def portfolio_weight_generator(
             if alloc <= 0:
                 continue
 
-            # Filter data to strategy's universe
+            # Filter data to strategy's universe.
+            # walk_forward passes {symbol: DataFrame[col=symbol]} but strategies
+            # expect {symbol: DataFrame[col="close"]}, so rename the column.
             universe = strategy.get_universe()
-            strategy_data = {
-                sym: data[sym] for sym in universe if sym in data
-            }
+            strategy_data = {}
+            for sym in universe:
+                if sym in data:
+                    df = data[sym]
+                    if sym in df.columns and "close" not in df.columns:
+                        df = df.rename(columns={sym: "close"})
+                    strategy_data[sym] = df
 
             if not strategy_data:
                 continue

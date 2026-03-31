@@ -1,0 +1,5 @@
+# Cached data (re-fetched per session)
+data_cache.pkl
+
+# Baseline (auto-computed, session-specific)
+baseline.json
