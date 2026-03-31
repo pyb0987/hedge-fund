@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hedgefund.core.enums import RebalanceFrequency
 
-
 # --- Risk Limits ---
 
 
@@ -23,9 +22,7 @@ class RiskConfig(BaseModel):
     max_symbol_exposure: float = Field(
         default=0.20, ge=0.05, le=0.50, description="Max cross-strategy symbol aggregate exposure"
     )
-    daily_var_95: float = Field(
-        default=0.02, ge=0.005, le=0.10, description="95% daily VaR limit"
-    )
+    daily_var_95: float = Field(default=0.02, ge=0.005, le=0.10, description="95% daily VaR limit")
     per_trade_stop_loss: float = Field(
         default=0.05, ge=0.01, le=0.20, description="Per-trade stop loss"
     )
@@ -173,7 +170,9 @@ class EtfMeanReversionConfig(BaseModel):
     holding_days: int = Field(default=7, ge=1, le=30)
     drift_correction: bool = Field(default=False, description="Use drift-corrected z-score")
     drift_lookback_multiplier: int = Field(
-        default=3, ge=2, le=10,
+        default=3,
+        ge=2,
+        le=10,
         description="Multiplier for drift estimation window (drift_window = lookback * multiplier)",
     )
 
@@ -223,10 +222,21 @@ class SectorMomentumConfig(BaseModel):
     holding_days: int = Field(default=14, ge=7, le=60)
     top_n: int = Field(default=3, ge=1, le=5)
 
-    universe: list[str] = Field(default=[
-        "XLK", "XLF", "XLE", "XLV", "XLI",
-        "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB",
-    ])
+    universe: list[str] = Field(
+        default=[
+            "XLK",
+            "XLF",
+            "XLE",
+            "XLV",
+            "XLI",
+            "XLC",
+            "XLY",
+            "XLP",
+            "XLU",
+            "XLRE",
+            "XLB",
+        ]
+    )
 
     costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.0005)
     validation: ValidationConfig = ValidationConfig()
@@ -265,6 +275,19 @@ class MarketHedgeConfig(BaseModel):
     validation: ValidationConfig = ValidationConfig()
 
 
+# --- Beta Hedge Overlay ---
+
+
+class BetaHedgeConfig(BaseModel):
+    """Portfolio-level beta hedging overlay configuration."""
+
+    enabled: bool = Field(default=False)
+    benchmark: str = Field(default="SPY")
+    window: int = Field(default=60, ge=20, le=252)
+    min_periods: int = Field(default=20, ge=10, le=60)
+    max_hedge_ratio: float = Field(default=0.30, ge=0.0, le=1.0)
+
+
 # --- Global Settings ---
 
 
@@ -277,3 +300,4 @@ class GlobalSettings(BaseModel):
     schedule: ScheduleConfig = ScheduleConfig()
     data: DataConfig = DataConfig()
     monitoring: MonitoringConfig = MonitoringConfig()
+    beta_hedge: BetaHedgeConfig = BetaHedgeConfig()

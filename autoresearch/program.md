@@ -31,16 +31,26 @@ Maximize **Information Ratio** (alpha / tracking_error).
 - `config/strategies/sector_momentum.yaml` — lookback, holding_days, top_n
 - `config/strategies/treasury_park.yaml` — symbol
 
-### Portfolio Allocation
-- `config/settings.yaml` — `allocation:` 섹션만 수정 가능 (risk 섹션 수정 금지)
+### Portfolio-Level Infrastructure
+- `src/hedgefund/backtest/portfolio_backtest.py` — 포트폴리오 합산 + 헤지 오버레이
+- `src/hedgefund/risk/beta_hedge.py` — 베타 헤징 계산 (신규)
+
+### Portfolio Allocation & Config
+- `config/settings.yaml` — `allocation:` + `beta_hedge:` 섹션 수정 가능 (risk 섹션 수정 금지)
 
 ## What You CANNOT Modify (Immutable)
 
 - `autoresearch/evaluate.py` — 평가기 (수정 시 자기 평가 오염)
 - `autoresearch/program.md` — 이 파일
-- `src/hedgefund/backtest/` — 백테스트 엔진 (평가 인프라)
+- `src/hedgefund/backtest/engine.py` — 백테스트 엔진 코어
+- `src/hedgefund/backtest/walk_forward.py` — Walk-forward 프레임워크
+- `src/hedgefund/backtest/metrics.py` — 성과 지표
+- `src/hedgefund/backtest/deflated_sharpe.py` — DSR 보정
 - `src/hedgefund/core/` — 도메인 모델, risk_metrics, enums, exceptions
-- `src/hedgefund/risk/` — 리스크 관리
+- `src/hedgefund/risk/manager.py` — 리스크 매니저
+- `src/hedgefund/risk/limits.py` — 리스크 한도
+- `src/hedgefund/risk/drawdown.py` — 드로다운 관리
+- `src/hedgefund/risk/position_sizer.py` — 포지션 사이징
 - `src/hedgefund/strategies/base.py` — Strategy Protocol/ABC
 - `src/hedgefund/strategies/registry.py` — 레지스트리
 - `src/hedgefund/config/schemas.py` — Pydantic 스키마

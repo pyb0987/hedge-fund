@@ -22,6 +22,14 @@ allocation:
   treasury_park: 0.45                # 45% (~$4,500) → BIL 단기국채 ETF (무위험 수익)
   # 나머지 10% (~$1,000) = 현금 버퍼 (긴급 리밸런싱 여유)
 
+# Beta Hedge Overlay (포트폴리오 레벨 시장 중립화)
+beta_hedge:
+  enabled: true                       # 활성화
+  benchmark: SPY                      # 헤지 벤치마크
+  window: 60                          # 롤링 베타 윈도우 (거래일)
+  min_periods: 20                     # 최소 데이터 포인트
+  max_hedge_ratio: 0.30               # 최대 헤지 비율 (SPY short 상한)
+
 # Scheduling
 schedule:
   weekly_rebalance_day: monday       # 주간 리밸런싱 요일
