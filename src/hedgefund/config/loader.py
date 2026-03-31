@@ -14,6 +14,7 @@ from hedgefund.config.schemas import (
     EtfMeanReversionConfig,
     GlobalSettings,
     MarketHedgeConfig,
+    PairsTradingConfig,
     SectorMomentumConfig,
     TreasuryParkConfig,
 )
@@ -29,6 +30,7 @@ STRATEGY_CONFIG_MAP: dict[str, type[BaseModel]] = {
     "market_hedge": MarketHedgeConfig,
     "treasury_park": TreasuryParkConfig,
     "sector_momentum": SectorMomentumConfig,
+    "pairs_trading": PairsTradingConfig,
 }
 
 DEFAULT_CONFIG_DIR = Path("config")
@@ -99,8 +101,7 @@ def load_strategy_config(
     config_cls = STRATEGY_CONFIG_MAP.get(strategy_name)
     if config_cls is None:
         raise ConfigError(
-            f"Unknown strategy '{strategy_name}'. "
-            f"Available: {list(STRATEGY_CONFIG_MAP.keys())}"
+            f"Unknown strategy '{strategy_name}'. Available: {list(STRATEGY_CONFIG_MAP.keys())}"
         )
 
     path = config_dir / "strategies" / f"{strategy_name}.yaml"

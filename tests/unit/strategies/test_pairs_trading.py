@@ -5,10 +5,10 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import pytest
-from hedgefund.strategies.pairs_trading import PairsTradingStrategy
 
 from hedgefund.config.schemas import PairsTradingConfig
 from hedgefund.core.enums import Exchange, SignalDirection
+from hedgefund.strategies.pairs_trading import PairsTradingStrategy
 
 
 def _make_cointegrated_pair(
@@ -90,8 +90,8 @@ def diverged_data() -> dict[str, pd.DataFrame]:
 class TestPairsTradingConfig:
     def test_default_pairs(self) -> None:
         config = PairsTradingConfig()
-        assert len(config.pairs) == 3
-        assert "GLD,GDX" in config.pairs
+        assert len(config.pairs) == 2
+        assert "SPY,QQQ" in config.pairs
 
     def test_parsed_pairs(self) -> None:
         config = PairsTradingConfig(pairs=["GLD,GDX", "XLE,USO"])

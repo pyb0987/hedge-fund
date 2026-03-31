@@ -10,13 +10,11 @@ parameters:
   zscore_exit: 0.5
   hedge_ratio_window: 60
 
-# Cointegrated ETF pairs (domain knowledge)
-# GLD/GDX: gold spot vs gold miners
-# XLE/USO: energy sector vs crude oil
-# TLT/IEF: long-term vs intermediate treasury
+# Cointegrated ETF pairs (evaluator-available symbols)
+# SPY/QQQ: large-cap equity vs tech-heavy (r > 0.90)
+# TLT/IEF: long-term vs intermediate treasury (same yield curve)
 pairs:
-  - GLD,GDX
-  - XLE,USO
+  - SPY,QQQ
   - TLT,IEF
 
 costs:

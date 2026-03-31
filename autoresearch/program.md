@@ -23,6 +23,7 @@ Maximize **Information Ratio** (alpha / tracking_error).
 - `src/hedgefund/strategies/dual_momentum.py` — 교차자산 모멘텀, 방어 전환 로직
 - `src/hedgefund/strategies/sector_momentum.py` — 섹터 선별 로직, 모멘텀 계산
 - `src/hedgefund/strategies/treasury_park.py` — (제한적) 파킹 로직
+- `src/hedgefund/strategies/pairs_trading.py` — 코인티그레이션 쌍 스프레드 z-score, 헤지비율, long-short 로직
 
 ### Strategy Config (.yaml)
 - `config/strategies/crypto_momentum.yaml` — lookback, holding_days, top_n
@@ -30,6 +31,7 @@ Maximize **Information Ratio** (alpha / tracking_error).
 - `config/strategies/dual_momentum.yaml` — lookback, defensive weights
 - `config/strategies/sector_momentum.yaml` — lookback, holding_days, top_n
 - `config/strategies/treasury_park.yaml` — symbol
+- `config/strategies/pairs_trading.yaml` — pairs, lookback, zscore_entry/exit, hedge_ratio_window, holding_days
 
 ### Portfolio-Level Infrastructure
 - `src/hedgefund/backtest/portfolio_backtest.py` — 포트폴리오 합산 + 헤지 오버레이
@@ -118,16 +120,30 @@ Maximize **Information Ratio** (alpha / tracking_error).
 
 ## Rejection History — EXHAUSTED AXES (DO NOT REVISIT)
 
-(아직 없음 — 실험 진행에 따라 인간이 업데이트)
+### Beta hedge only (alpha 부재 상태에서 hedge)
+14회 실험 결과: 기존 전략 모두 beta-driven. hedge 적용 시 수익원(시장 노출) 제거 → alpha 음수.
+beta hedge는 alpha 확보 후에만 효과적. pairs_trading alpha 확보 전까지 beta_hedge.enabled=false 유지.
 
 ## Promising Unexplored Directions (Hints)
 
+### 최우선: Pairs Trading 최적화 (신규 alpha 전략)
+- **zscore_entry/exit 튜닝**: 2.0/0.5 기본값 — 더 공격적(1.5) 또는 보수적(2.5) 진입
+- **lookback_days 튜닝**: 60일 기본 — 짧으면(30) 빠른 반응, 길면(120) 안정
+- **holding_days**: 5일 기본 — 리밸런싱 빈도 vs 비용 트레이드오프
+- **hedge_ratio_window**: 60일 — 헤지 비율 안정성 조절
+- **새로운 쌍 추가**: evaluator 데이터 내 가용 쌍 (GLD/TLT 등)
+- **비대칭 진입**: long spread vs short spread 진입 임계치 차별화
+- **Allocation 최적화**: pairs_trading 비중 10~20% 범위 탐색
+
+### 기존 전략 개선
 - VIX 기반 레짐 필터 (고변동성 시 현금 비중 증가)
 - 이동평균 크로스오버를 모멘텀 확인 필터로 사용
-- 달러 인덱스(DXY) 기반 crypto-ETF 배분 스위칭
 - 볼린저 밴드 %B를 z-score 보조 지표로 결합
-- Funding rate (crypto) 기반 과열 감지
 - 섹터 모멘텀 활성화 (현재 allocation 0) + 적절한 비중 배분
+
+### Portfolio 조합
+- Pairs trading + beta hedge 활성화 (alpha 확보 후)
+- 교차 전략 상관관계 기반 동적 배분
 
 ## Session Handoff Protocol
 

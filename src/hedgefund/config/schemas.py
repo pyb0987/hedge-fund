@@ -274,8 +274,8 @@ class PairsTradingConfig(BaseModel):
 
     # Predefined cointegrated pairs: "SYMBOL_A,SYMBOL_B"
     pairs: list[str] = Field(
-        default=["GLD,GDX", "XLE,USO", "TLT,IEF"],
-        description="Comma-separated pair strings, e.g. 'GLD,GDX'",
+        default=["SPY,QQQ", "TLT,IEF"],
+        description="Comma-separated pair strings, e.g. 'SPY,QQQ'",
     )
 
     costs: CostConfig = CostConfig(commission_rate=0.0, slippage_rate=0.001)
