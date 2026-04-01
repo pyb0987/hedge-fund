@@ -27,7 +27,7 @@ allocation:
 beta_hedge:
   enabled: true                       # 활성화
   benchmark: SPY                      # 헤지 벤치마크
-  window: 60                          # 롤링 베타 윈도우 (거래일)
+  window: 90                          # 롤링 베타 윈도우 (거래일)
   min_periods: 20                     # 최소 데이터 포인트
   max_hedge_ratio: 0.30               # 최대 헤지 비율 (SPY short 상한)
 
