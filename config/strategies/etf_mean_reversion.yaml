@@ -17,6 +17,8 @@ universe:
   - TLT   # 20+ Year Treasury
   - GLD   # Gold
   - IEF   # 7-10 Year Treasury
+  - GDX   # Gold Miners (높은 변동성 → MR 기회)
+  - SLV   # Silver (높은 변동성 → MR 기회)
 
 # Transaction costs
 costs:

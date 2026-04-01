@@ -17,9 +17,9 @@ risk:
 allocation:
   crypto_momentum: 0.10              # 10% (~$1,000) — 비용 드래그 감소
   etf_mean_reversion: 0.20           # 20% (~$2,000)
-  dual_momentum: 0.15                # 15% (~$1,500) — BTC 교차 노출 20% 한도 준수
+  dual_momentum: 0.10                # 10% — beta 기여 감소
   market_hedge: 0.0                  # NO-GO: SPY+SH 충돌, 변동성 감쇠
-  treasury_park: 0.45                # 45% (~$4,500) → BIL 단기국채 ETF (무위험 수익)
+  treasury_park: 0.50                # 50% → BIL 단기국채 ETF (무위험 수익)
   pairs_trading: 0.0                 # 비활성 — alpha 확보 후 재활성화
   # 나머지 10% (~$1,000) = 현금 버퍼 (긴급 리밸런싱 여유)
 
