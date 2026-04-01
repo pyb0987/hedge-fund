@@ -7,7 +7,7 @@ rebalance_frequency: weekly
 
 parameters:
   lookback_days: 20          # z-score 측정 기간
-  z_entry_threshold: -1.0    # 매수 진입 z-score (drift correction 하에서 -1.5는 SPY/QQQ 구조적 미도달)
+  z_entry_threshold: -1.1    # 매수 진입 z-score (약간 보수적, 높은 확신만)
   z_exit_threshold: 1.5      # 매도 청산 z-score
   holding_days: 7            # 홀딩 기간
 
