@@ -271,9 +271,15 @@ class CryptoMomentumStrategy(BaseStrategy):
 
                 current_weights = {}
                 if selected:
-                    weight_per_asset = 1.0 / len(selected)
-                    for sym, _ in selected:
-                        current_weights[sym] = weight_per_asset
+                    # Momentum-proportional weighting: stronger momentum → more weight
+                    total_score = sum(m for _, m in selected)
+                    if total_score > 0:
+                        for sym, m in selected:
+                            current_weights[sym] = m / total_score
+                    else:
+                        weight_per_asset = 1.0 / len(selected)
+                        for sym, _ in selected:
+                            current_weights[sym] = weight_per_asset
 
                 days_since_rebalance = 0
 
