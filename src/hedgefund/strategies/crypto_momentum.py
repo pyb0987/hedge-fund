@@ -8,6 +8,7 @@ Upbit KRW 상위 코인 중 lookback일 모멘텀 상위 top_n개를 매수.
 
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from hedgefund.config.schemas import CryptoMomentumConfig
@@ -162,10 +163,12 @@ class CryptoMomentumStrategy(BaseStrategy):
         self,
         data: dict[str, pd.DataFrame],
     ) -> list[tuple[str, float]]:
-        """Compute momentum score for each symbol in universe.
+        """Compute volatility-adjusted momentum for each symbol in universe.
 
-        Only considers symbols within universe_size limit.
+        Uses momentum / volatility (Sharpe-like) to penalize high-vol assets
+        with weak trends and reward consistent movers.
         """
+
         scores: list[tuple[str, float]] = []
         lookback = self._config.lookback_days
         max_size = self._config.universe_size
@@ -175,8 +178,21 @@ class CryptoMomentumStrategy(BaseStrategy):
             if df is None or len(df) < lookback + 1:
                 continue
 
-            momentum = self.compute_momentum(df["close"], lookback)
-            scores.append((symbol, momentum))
+            prices = df["close"]
+            momentum = self.compute_momentum(prices, lookback)
+
+            # Volatility adjustment: annualized std of daily log returns
+            log_returns = np.log(prices / prices.shift(1)).dropna()
+            if len(log_returns) < lookback:
+                scores.append((symbol, momentum))
+                continue
+            vol = float(log_returns.iloc[-lookback:].std())
+            if vol > 0:
+                # Risk-adjusted momentum (Sharpe-like)
+                adj_momentum = momentum / vol
+            else:
+                adj_momentum = momentum
+            scores.append((symbol, adj_momentum))
 
         return scores
 
@@ -233,7 +249,7 @@ class CryptoMomentumStrategy(BaseStrategy):
             )
 
             if is_rebalance:
-                # Compute momentum for each symbol at this date
+                # Compute vol-adjusted momentum for each symbol at this date
                 scores: list[tuple[str, float]] = []
                 for sym in symbols:
                     df = data[sym]
@@ -242,6 +258,11 @@ class CryptoMomentumStrategy(BaseStrategy):
                     if len(available) < lookback + 1:
                         continue
                     momentum = self.compute_momentum(available["close"], lookback)
+                    log_ret = np.log(available["close"] / available["close"].shift(1)).dropna()
+                    if len(log_ret) >= lookback:
+                        vol = float(log_ret.iloc[-lookback:].std())
+                        if vol > 0:
+                            momentum = momentum / vol
                     scores.append((sym, momentum))
 
                 # Rank and assign weights
