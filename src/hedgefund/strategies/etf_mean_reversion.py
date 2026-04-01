@@ -64,52 +64,58 @@ class EtfMeanReversionStrategy(BaseStrategy):
             if z <= self._config.z_entry_threshold:
                 # Oversold — mean reversion buy
                 strength = self._zscore_to_strength(z, is_entry=True)
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=self.exchange,
-                    direction=SignalDirection.LONG,
-                    strength=strength,
-                    timestamp=timestamp,
-                    metadata={
-                        "z_score": z,
-                        "z_entry": self._config.z_entry_threshold,
-                        "z_exit": self._config.z_exit_threshold,
-                        "lookback_days": float(self._config.lookback_days),
-                    },
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=self.exchange,
+                        direction=SignalDirection.LONG,
+                        strength=strength,
+                        timestamp=timestamp,
+                        metadata={
+                            "z_score": z,
+                            "z_entry": self._config.z_entry_threshold,
+                            "z_exit": self._config.z_exit_threshold,
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
             elif z >= self._config.z_exit_threshold:
                 # Overbought — close position
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=self.exchange,
-                    direction=SignalDirection.FLAT,
-                    strength=0.0,
-                    timestamp=timestamp,
-                    metadata={
-                        "z_score": z,
-                        "z_entry": self._config.z_entry_threshold,
-                        "z_exit": self._config.z_exit_threshold,
-                        "lookback_days": float(self._config.lookback_days),
-                    },
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=self.exchange,
+                        direction=SignalDirection.FLAT,
+                        strength=0.0,
+                        timestamp=timestamp,
+                        metadata={
+                            "z_score": z,
+                            "z_entry": self._config.z_entry_threshold,
+                            "z_exit": self._config.z_exit_threshold,
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
             else:
                 # Neutral zone — no strong signal
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=self.exchange,
-                    direction=SignalDirection.FLAT,
-                    strength=0.0,
-                    timestamp=timestamp,
-                    metadata={
-                        "z_score": z,
-                        "z_entry": self._config.z_entry_threshold,
-                        "z_exit": self._config.z_exit_threshold,
-                        "lookback_days": float(self._config.lookback_days),
-                    },
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=self.exchange,
+                        direction=SignalDirection.FLAT,
+                        strength=0.0,
+                        timestamp=timestamp,
+                        metadata={
+                            "z_score": z,
+                            "z_entry": self._config.z_entry_threshold,
+                            "z_exit": self._config.z_exit_threshold,
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
 
         return signals
 
@@ -160,7 +166,9 @@ class EtfMeanReversionStrategy(BaseStrategy):
 
         Deeper oversold/overbought → stronger signal.
         """
-        threshold = abs(self._config.z_entry_threshold if is_entry else self._config.z_exit_threshold)
+        threshold = abs(
+            self._config.z_entry_threshold if is_entry else self._config.z_exit_threshold
+        )
         max_z = threshold * 2  # z of -3.0 at threshold -1.5 → max strength
         magnitude = abs(z)
         return min(1.0, max(0.0, (magnitude - threshold) / (max_z - threshold)))
@@ -210,8 +218,18 @@ class EtfMeanReversionStrategy(BaseStrategy):
                     active_symbols.append(sym)
 
             if active_symbols:
-                weight_per = 1.0 / len(active_symbols)
+                # Volatility-proportional weighting: higher vol → more MR opportunity → more weight
+                vols: dict[str, float] = {}
                 for sym in active_symbols:
-                    weights.loc[date, sym] = weight_per
+                    df_sym = data[sym]
+                    avail = df_sym.loc[df_sym.index <= date]
+                    log_ret = np.log(avail["close"] / avail["close"].shift(1)).dropna()
+                    if len(log_ret) >= lookback:
+                        vols[sym] = max(float(log_ret.iloc[-lookback:].std()), 1e-8)
+                    else:
+                        vols[sym] = 1e-8
+                total_vol = sum(vols.values())
+                for sym in active_symbols:
+                    weights.loc[date, sym] = vols[sym] / total_vol
 
         return weights
