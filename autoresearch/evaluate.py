@@ -80,7 +80,21 @@ def fetch_data() -> dict:
     yf = YFinanceProvider()
     upbit = UpbitProvider()
 
-    etf_symbols = ["SPY", "QQQ", "TLT", "GLD", "IEF", "BIL"]
+    etf_symbols = [
+        # Core portfolio
+        "SPY",
+        "QQQ",
+        "TLT",
+        "GLD",
+        "IEF",
+        "BIL",
+        # Pairs trading universe — structural cointegration candidates
+        "GDX",  # gold miners (pairs: GLD)
+        "SLV",  # silver (pairs: GLD)
+        "XLE",  # energy sector (pairs: USO)
+        "USO",  # crude oil (pairs: XLE)
+        "XLF",  # financials sector
+    ]
     crypto_symbols = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA"]
 
     data = {}

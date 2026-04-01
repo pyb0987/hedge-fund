@@ -124,16 +124,39 @@ Maximize **Information Ratio** (alpha / tracking_error).
 14회 실험 결과: 기존 전략 모두 beta-driven. hedge 적용 시 수익원(시장 노출) 제거 → alpha 음수.
 beta hedge는 alpha 확보 후에만 효과적. pairs_trading alpha 확보 전까지 beta_hedge.enabled=false 유지.
 
+### SPY/QQQ + TLT/IEF 쌍으로는 alpha 불가 (E1-E11)
+상관이 너무 높아 스프레드 변동 < 거래 비용. pairs 비중↑ → alpha↓ (E10: -44%).
+GLD/GDX, XLE/USO 등 구조적 코인티그레이션 쌍이 필요.
+
+### Allocation만으로는 efficiency 개선 불가 (E3, E7, E8)
+Treasury 비중↑ → active 부분의 IS/OOS 비율이 지배 → efficiency 악화.
+전략 로직 + pair 선택으로 alpha를 만들어야 efficiency가 따라옴.
+
+### Weight smoothing / signal confirmation 역효과 (E4, E6)
+포트폴리오 smoothing은 MR 타이밍을 방해. ETF MR 2일 확인은 OOS 기회 상실.
+
 ## Promising Unexplored Directions (Hints)
 
-### 최우선: Pairs Trading 최적화 (신규 alpha 전략)
-- **zscore_entry/exit 튜닝**: 2.0/0.5 기본값 — 더 공격적(1.5) 또는 보수적(2.5) 진입
-- **lookback_days 튜닝**: 60일 기본 — 짧으면(30) 빠른 반응, 길면(120) 안정
-- **holding_days**: 5일 기본 — 리밸런싱 빈도 vs 비용 트레이드오프
-- **hedge_ratio_window**: 60일 — 헤지 비율 안정성 조절
-- **새로운 쌍 추가**: evaluator 데이터 내 가용 쌍 (GLD/TLT 등)
-- **비대칭 진입**: long spread vs short spread 진입 임계치 차별화
-- **Allocation 최적화**: pairs_trading 비중 10~20% 범위 탐색
+### 최우선: Pairs Trading — pair 선택 + 파라미터 최적화
+**가용 심볼**: SPY, QQQ, TLT, GLD, IEF, BIL, GDX, SLV, XLE, USO, XLF + crypto 5종
+
+**Pair 선택** (구조적 코인티그레이션이 핵심):
+- GLD/GDX (금 현물 vs 금광) — 가장 유력, 동일 기초자산 노출
+- XLE/USO (에너지 섹터 vs 원유) — 원유 가격 연동
+- GLD/SLV (금 vs 은) — 귀금속 상관
+- TLT/IEF (장기 vs 중기 국채) — 수익률 곡선
+- SPY/QQQ는 **상관이 너무 높아 스프레드 변동 < 비용** (E10에서 확인, 비추)
+
+**파라미터 튜닝**:
+- zscore_entry: 1.0~2.5 (공격적~보수적)
+- lookback_days: 30~120
+- holding_days: 3~10
+- hedge_ratio_window: 30~120
+
+**전략 코드 변경** (pairs_trading.py):
+- 스프레드 계산 방식: log price spread vs returns-based vs ratio
+- 비대칭 진입: long spread vs short spread 임계치 차별화
+- Volatility scaling: 스프레드 변동성에 따라 포지션 크기 조절
 
 ### 기존 전략 개선
 - VIX 기반 레짐 필터 (고변동성 시 현금 비중 증가)
