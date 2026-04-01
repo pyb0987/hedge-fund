@@ -34,6 +34,8 @@
 - CLI: `uv run python -m hedgefund paper-run [--dry-run] [--verbose]`, `paper-reset [--yes]`
 - 구동 주기: 일 1회 (매일 21:00 KST 권장)
 - 리밸런싱 게이트: crypto=14일(격주), dual_momentum=월간, etf=매일(z-score)
+- **검증 기간**: 2026-04-01 ~ 2026-07-01 (3개월, E70 autoresearch 결과 반영)
+- **Go/No-Go 기준**: Sharpe ≥ 0.8, MaxDD ≤ 20%, 실거래 슬리피지 ≤ 0.1%
 - **주말 필터링**: US 시장 휴장일(토/일)에 Alpaca 전략 스킵, crypto+dual_momentum만 실행
 - 상태 저장: `data/paper_state/{upbit,alpaca,strategies}.json`
 - Two PaperExecutors: UPBIT (KRW) + ALPACA (USD), 자본 분할 기반
