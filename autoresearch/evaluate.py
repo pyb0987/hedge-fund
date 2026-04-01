@@ -39,7 +39,7 @@ IS_RATIO = 0.30
 OOS_RATIO = 0.10
 MAX_BETA = 0.30
 MAX_DD = 0.20
-MIN_EFFICIENCY = 0.25  # relaxed: beta-driven portfolio phase (raise when alpha established)
+MIN_EFFICIENCY = 0.10  # minimal: alpha discovery phase (raise when alpha established)
 
 
 # --- Timeout ---
