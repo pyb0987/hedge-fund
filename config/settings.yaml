@@ -16,10 +16,10 @@ risk:
 # Strategy Allocation (합계 ≤ 1.0, 나머지는 현금 버퍼)
 allocation:
   crypto_momentum: 0.10              # 10% (~$1,000) — 비용 드래그 감소
-  etf_mean_reversion: 0.35           # 35% (~$3,500) — alpha 생성 전략 주력
+  etf_mean_reversion: 0.40           # 40% (max_strategy_allocation) — alpha 극대화
   dual_momentum: 0.10                # 10% — beta 기여 감소
   market_hedge: 0.0                  # NO-GO: SPY+SH 충돌, 변동성 감쇠
-  treasury_park: 0.35                # 35% → BIL 단기국채 ETF (무위험 수익)
+  treasury_park: 0.30                # 30% → BIL 단기국채 ETF (무위험 수익)
   pairs_trading: 0.0                 # 비활성 — alpha 확보 후 재활성화
   # 나머지 10% (~$1,000) = 현금 버퍼 (긴급 리밸런싱 여유)
 
