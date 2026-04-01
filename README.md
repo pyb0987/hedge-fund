@@ -3,10 +3,10 @@
 $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스템.
 **목표는 수익 극대화가 아니라 시장에서의 생존(자본 보존 우선, 성장 차선)**.
 
-4개의 비상관 전략 + 45% 무위험 주차(Treasury)를 동시 운용하여
+4개의 비상관 전략 + 37% 무위험 주차(Treasury) + Beta Hedge 오버레이를 동시 운용하여
 단일 전략 실패 리스크를 분산하고, 엄격한 리스크 관리 규칙으로 자본을 보호합니다.
 
-> **Paper Trading 진행 중** — 3개월 검증(Go/No-Go) 후 실거래 전환 예정
+> **Paper Trading 진행 중** (2026-04-01 ~ 2026-07-01) — Sharpe ≥ 0.8, MaxDD ≤ 20%, Slippage ≤ 0.1% 통과 시 실거래 전환
 
 ---
 
@@ -25,10 +25,10 @@ $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스
      ┌───────▼──────────────▼────────┐
      │         Strategy Engine        │
      │  A: Crypto Momentum   (10%)   │
-     │  B: ETF Mean Reversion (20%) │
-     │  C: Dual Momentum     (15%)  │
-     │  D: Treasury Park     (45%)  │
-     │  Cash Buffer          (10%)  │
+     │  B: ETF Mean Reversion (40%) │
+     │  C: Dual Momentum     (10%)  │
+     │  D: Treasury Park     (37%)  │
+     │  Cash Buffer           (3%)  │
      └──────────────┬────────────────┘
                     │ Signals
               ┌─────▼──────┐
@@ -58,11 +58,12 @@ $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스
 
 | 전략 | 배분 | 거래소 | 방향 | 역할 |
 |------|:---:|--------|------|------|
-| A: Crypto Momentum | 10% | Upbit | Long-only | 크립토 모멘텀 (격주 리밸런싱) |
-| B: ETF Mean Reversion | 20% | Alpaca | Long-only | ETF z-score 평균회귀 |
-| C: Dual Momentum | 15% | Both | Long + 방어 바스켓 | 교차자산 모멘텀 (월간) |
-| D: Treasury Park | 45% | Alpaca | BIL 상시 홀딩 | 유휴 현금 → 무위험 수익 |
-| Cash Buffer | 10% | - | - | 긴급 리밸런싱 여유 |
+| A: Crypto Momentum | 10% | Upbit | Long-only | vol-adjusted 랭킹 + momentum-proportional 가중 |
+| B: ETF Mean Reversion | 40% | Alpaca | Long-only | z-score MR + vol-proportional 가중 (z_entry=-1.1) |
+| C: Dual Momentum | 10% | Both | Long + 방어 바스켓 | vol-adjusted 교차자산 모멘텀 (월간) |
+| D: Treasury Park | 37% | Alpaca | BIL 상시 홀딩 | 유휴 현금 → 무위험 수익 |
+| Beta Hedge | overlay | - | SPY short | 시장 베타 중립화 (window=90, max_ratio=0.40) |
+| Cash Buffer | 3% | - | - | 최소 리밸런싱 여유 |
 
 ### 전략 A: 암호화폐 모멘텀
 
@@ -70,17 +71,18 @@ $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스
 
 - **유니버스**: KRW 거래량 상위 15개 코인 (동적 선정)
 - **리밸런싱**: 14일(격주) — 거래 비용 최소화
-- **매수**: 20일 모멘텀 양수인 코인 중 상위 3개에 균등 배분
+- **매수**: 20일 모멘텀 양수인 코인 중 상위 3개에 **모멘텀 비례 배분** (강한 모멘텀 → 더 큰 포지션)
 - **매도**: 순위 밖으로 밀려나거나 모멘텀 음수 시 전량 매도
 
 ### 전략 B: 미국 ETF 평균회귀
 
 **원리**: ETF 가격이 평균에서 크게 벗어나면 다시 돌아오는 경향(평균회귀)을 이용.
 
-- **유니버스**: SPY, QQQ, TLT, GLD, IEF
+- **유니버스**: SPY, QQQ, TLT, GLD, IEF, GDX, SLV
 - **리밸런싱**: 매일 체크 (z-score 임계치 기반)
-- **매수**: z-score ≤ -1.0 (drift correction 적용)
+- **매수**: z-score ≤ -1.1 (drift correction 적용)
 - **매도**: z-score ≥ +1.5
+- **가중**: **변동성 비례 배분** — 높은 변동성 = 더 큰 평균회귀 기회 → 더 큰 포지션
 
 ### 전략 C: 듀얼 모멘텀
 
@@ -89,13 +91,21 @@ $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스
 - **공격 자산**: BTC/KRW, SPY
 - **방어 자산**: TLT, GLD (분산 바스켓)
 - **리밸런싱**: 월간 (매월 1일)
+- **비교**: **변동성 조정 모멘텀** (momentum / volatility) — BTC vs SPY 공정 비교
 - 둘 다 양수 → 승자에 100%, 둘 다 음수 → 방어 바스켓으로 전환
 
 ### 전략 D: Treasury Park
 
-- **BIL** (1-3개월 미국 단기 국채 ETF) 상시 보유
+- **BIL** (1-3개월 미국 단기 국채 ETF) 상시 보유 (37%)
 - 연 ~5% 무위험 수익으로 유휴 자본 활용
 - 리밸런싱 불필요 (보유 유지)
+
+### Beta Hedge Overlay
+
+- 포트폴리오 전체의 시장 베타를 줄이는 **오버레이 전략**
+- Rolling window(90일) 기반 포트폴리오 β 계산 → SPY short으로 중립화
+- 최대 헤지 비율: 40% (과도한 헤지 방지)
+- 전략이 아닌 리스크 관리 레이어로 동작
 
 ---
 
@@ -151,7 +161,7 @@ $10,000 / 1,300만원으로 시작하는 자동화된 퀀트 헤지펀드 시스
 | 패키지 관리 | uv + hatchling |
 | 거래소 SDK | pyupbit (Upbit), alpaca-trade-api (Alpaca) |
 | 데이터 | yfinance (ETF), pyupbit (암호화폐) |
-| 검증 | pydantic (설정), pytest (464 tests, 89% coverage) |
+| 검증 | pydantic (설정), pytest (497 tests, 89% coverage) |
 | 저장소 | SQLite |
 | 스케줄링 | launchd (macOS) |
 | 로깅 | structlog |
@@ -210,13 +220,13 @@ hedge-fund/
 │   ├── config/                # YAML → Pydantic 검증
 │   ├── data/                  # 시장 데이터 수집 (Upbit, yfinance) + SQLite
 │   ├── strategies/            # 매매 전략 (Protocol + ABC 패턴)
-│   ├── risk/                  # 리스크 관리 (drawdown, limits, position_sizer)
+│   ├── risk/                  # 리스크 관리 (drawdown, limits, position_sizer, beta_hedge)
 │   ├── execution/             # 주문 실행 (Paper / Upbit / Alpaca executors)
 │   ├── portfolio/             # 포트폴리오 관리 + 리밸런싱
 │   ├── backtest/              # 벡터화 백테스트 + Walk-Forward + Deflated Sharpe
 │   ├── monitoring/            # Paper trading 리포트 + Telegram 알림
 │   └── scheduler/             # launchd 기반 일일 스케줄러
-└── tests/                     # 464 tests (unit + architecture)
+└── tests/                     # 497 tests (unit + architecture)
 ```
 
 ---
