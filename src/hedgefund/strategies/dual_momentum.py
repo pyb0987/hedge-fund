@@ -62,8 +62,10 @@ class DualMomentumStrategy(BaseStrategy):
             return True
 
         # Same month → no rebalance
-        if (timestamp.year == self._last_rebalance_date.year
-                and timestamp.month == self._last_rebalance_date.month):
+        if (
+            timestamp.year == self._last_rebalance_date.year
+            and timestamp.month == self._last_rebalance_date.month
+        ):
             return False
 
         # New month — rebalance on or after rebalance_day
@@ -72,8 +74,10 @@ class DualMomentumStrategy(BaseStrategy):
     def get_rebalance_decision(self, timestamp: datetime) -> RebalanceDecision:
         if self._last_rebalance_date is None:
             return RebalanceDecision(
-                should_rebalance=True, reason="first_run",
-                days_since_last=None, gate_days=None,
+                should_rebalance=True,
+                reason="first_run",
+                days_since_last=None,
+                gate_days=None,
             )
         days_elapsed = (timestamp - self._last_rebalance_date).days
         same_month = (
@@ -82,17 +86,23 @@ class DualMomentumStrategy(BaseStrategy):
         )
         if same_month:
             return RebalanceDecision(
-                should_rebalance=False, reason="same_month",
-                days_since_last=days_elapsed, gate_days=None,
+                should_rebalance=False,
+                reason="same_month",
+                days_since_last=days_elapsed,
+                gate_days=None,
             )
         if timestamp.day < self._config.rebalance_day:
             return RebalanceDecision(
-                should_rebalance=False, reason="before_rebalance_day",
-                days_since_last=days_elapsed, gate_days=None,
+                should_rebalance=False,
+                reason="before_rebalance_day",
+                days_since_last=days_elapsed,
+                gate_days=None,
             )
         return RebalanceDecision(
-            should_rebalance=True, reason="monthly_gate",
-            days_since_last=days_elapsed, gate_days=None,
+            should_rebalance=True,
+            reason="monthly_gate",
+            days_since_last=days_elapsed,
+            gate_days=None,
         )
 
     def generate_signals(
@@ -121,12 +131,20 @@ class DualMomentumStrategy(BaseStrategy):
             df = data.get(symbol)
             if df is None or len(df) < lookback + 1:
                 return []  # insufficient data — no signal
-            momenta[symbol] = self.compute_momentum(df["close"], lookback)
+            raw_mom = self.compute_momentum(df["close"], lookback)
+            # Vol-adjusted momentum for fairer cross-asset comparison
+            import numpy as np
+
+            log_ret = np.log(df["close"] / df["close"].shift(1)).dropna()
+            if len(log_ret) >= lookback:
+                vol = float(log_ret.iloc[-lookback:].std())
+                momenta[symbol] = raw_mom / vol if vol > 0 else raw_mom
+            else:
+                momenta[symbol] = raw_mom
 
         # Check if at least one defensive asset has data
         defensive_with_data = [
-            s for s in self._defensive_assets
-            if s in data and len(data[s]) >= lookback + 1
+            s for s in self._defensive_assets if s in data and len(data[s]) >= lookback + 1
         ]
         if not defensive_with_data:
             return []
@@ -141,25 +159,36 @@ class DualMomentumStrategy(BaseStrategy):
                 direction = SignalDirection.LONG if symbol == winner else SignalDirection.FLAT
                 strength = 1.0 if symbol == winner else 0.0
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=exchange,
-                    direction=direction,
-                    strength=strength,
-                    timestamp=timestamp,
-                    metadata={"momentum": momenta[symbol], "regime": "offensive", "lookback_days": float(self._config.lookback_days)},
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=exchange,
+                        direction=direction,
+                        strength=strength,
+                        timestamp=timestamp,
+                        metadata={
+                            "momentum": momenta[symbol],
+                            "regime": "offensive",
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
             for def_sym in self._defensive_assets:
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=def_sym,
-                    exchange=Exchange.ALPACA,
-                    direction=SignalDirection.FLAT,
-                    strength=0.0,
-                    timestamp=timestamp,
-                    metadata={"regime": "offensive", "lookback_days": float(self._config.lookback_days)},
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=def_sym,
+                        exchange=Exchange.ALPACA,
+                        direction=SignalDirection.FLAT,
+                        strength=0.0,
+                        timestamp=timestamp,
+                        metadata={
+                            "regime": "offensive",
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
 
         elif len(positive_assets) == 1:
             # Only one positive → invest in that one
@@ -168,49 +197,72 @@ class DualMomentumStrategy(BaseStrategy):
                 direction = SignalDirection.LONG if symbol == winner else SignalDirection.FLAT
                 strength = 1.0 if symbol == winner else 0.0
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=exchange,
-                    direction=direction,
-                    strength=strength,
-                    timestamp=timestamp,
-                    metadata={"momentum": momenta[symbol], "regime": "mixed", "lookback_days": float(self._config.lookback_days)},
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=exchange,
+                        direction=direction,
+                        strength=strength,
+                        timestamp=timestamp,
+                        metadata={
+                            "momentum": momenta[symbol],
+                            "regime": "mixed",
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
             for def_sym in self._defensive_assets:
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=def_sym,
-                    exchange=Exchange.ALPACA,
-                    direction=SignalDirection.FLAT,
-                    strength=0.0,
-                    timestamp=timestamp,
-                    metadata={"regime": "mixed", "lookback_days": float(self._config.lookback_days)},
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=def_sym,
+                        exchange=Exchange.ALPACA,
+                        direction=SignalDirection.FLAT,
+                        strength=0.0,
+                        timestamp=timestamp,
+                        metadata={
+                            "regime": "mixed",
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
 
         else:
             # Both negative → defensive basket mode
             for symbol in self._offensive_assets:
                 exchange = Exchange.UPBIT if "KRW" in symbol else Exchange.ALPACA
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=symbol,
-                    exchange=exchange,
-                    direction=SignalDirection.FLAT,
-                    strength=0.0,
-                    timestamp=timestamp,
-                    metadata={"momentum": momenta[symbol], "regime": "defensive", "lookback_days": float(self._config.lookback_days)},
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=symbol,
+                        exchange=exchange,
+                        direction=SignalDirection.FLAT,
+                        strength=0.0,
+                        timestamp=timestamp,
+                        metadata={
+                            "momentum": momenta[symbol],
+                            "regime": "defensive",
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
             for def_sym, def_weight in zip(self._defensive_assets, self._defensive_weights):
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    symbol=def_sym,
-                    exchange=Exchange.ALPACA,
-                    direction=SignalDirection.LONG,
-                    strength=def_weight,
-                    timestamp=timestamp,
-                    metadata={"regime": "defensive", "weight": def_weight, "lookback_days": float(self._config.lookback_days)},
-                ))
+                signals.append(
+                    Signal(
+                        strategy_name=self.name,
+                        symbol=def_sym,
+                        exchange=Exchange.ALPACA,
+                        direction=SignalDirection.LONG,
+                        strength=def_weight,
+                        timestamp=timestamp,
+                        metadata={
+                            "regime": "defensive",
+                            "weight": def_weight,
+                            "lookback_days": float(self._config.lookback_days),
+                        },
+                    )
+                )
 
         # Mark rebalance date for monthly gate
         if signals:
@@ -274,7 +326,16 @@ class DualMomentumStrategy(BaseStrategy):
             available = df.loc[mask]
             if len(available) < lookback + 1:
                 continue
-            momenta[symbol] = self.compute_momentum(available["close"], lookback)
+            raw_mom = self.compute_momentum(available["close"], lookback)
+            # Vol-adjusted momentum for fairer cross-asset comparison
+            import numpy as np
+
+            log_ret = np.log(available["close"] / available["close"].shift(1)).dropna()
+            if len(log_ret) >= lookback:
+                vol = float(log_ret.iloc[-lookback:].std())
+                momenta[symbol] = raw_mom / vol if vol > 0 else raw_mom
+            else:
+                momenta[symbol] = raw_mom
 
         if len(momenta) < len(self._offensive_assets):
             return {}  # insufficient data
@@ -286,7 +347,4 @@ class DualMomentumStrategy(BaseStrategy):
             return {winner: 1.0}
         else:
             # Defensive basket allocation
-            return {
-                sym: w
-                for sym, w in zip(self._defensive_assets, self._defensive_weights)
-            }
+            return {sym: w for sym, w in zip(self._defensive_assets, self._defensive_weights)}
