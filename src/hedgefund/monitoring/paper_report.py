@@ -29,9 +29,10 @@ from hedgefund.portfolio.correlation import CorrelationReport, analyze_correlati
 class ReportThresholds:
     """Go/No-Go thresholds for paper trading validation."""
 
-    min_sharpe: float = 0.5
-    max_drawdown: float = 0.15
+    min_sharpe: float = 0.8
+    max_drawdown: float = 0.20
     min_profit_factor: float = 1.1
+    max_slippage_rate: float = 0.001  # 0.1% per trade
     min_cycles: int = 10
 
 
@@ -133,6 +134,7 @@ class ValidationResult:
     sharpe_pass: bool
     drawdown_pass: bool
     profit_factor_pass: bool
+    slippage_pass: bool
     sufficient_data: bool
     all_pass: bool
 
@@ -524,22 +526,37 @@ def analyze_strategy_sharpes(
     return tuple(reports)
 
 
+def analyze_slippage_rate(trades_df: pd.DataFrame) -> float:
+    """Compute average per-trade slippage rate (slippage / trade_value)."""
+    if trades_df.empty:
+        return 0.0
+    trade_values = (trades_df["price"] * trades_df["quantity"]).abs()
+    total_value = float(trade_values.sum())
+    if total_value <= 0:
+        return 0.0
+    total_slippage = float(trades_df["slippage"].sum())
+    return total_slippage / total_value
+
+
 def validate(
     performance: PerformanceReport,
     thresholds: ReportThresholds = ReportThresholds(),
+    avg_slippage_rate: float = 0.0,
 ) -> ValidationResult:
     """Go/No-Go validation against thresholds."""
     sharpe_pass = performance.sharpe_ratio >= thresholds.min_sharpe
     drawdown_pass = performance.max_drawdown <= thresholds.max_drawdown
     pf_pass = performance.profit_factor >= thresholds.min_profit_factor
+    slippage_pass = avg_slippage_rate <= thresholds.max_slippage_rate
     sufficient = not performance.insufficient_data
 
     return ValidationResult(
         sharpe_pass=sharpe_pass,
         drawdown_pass=drawdown_pass,
         profit_factor_pass=pf_pass,
+        slippage_pass=slippage_pass,
         sufficient_data=sufficient,
-        all_pass=sharpe_pass and drawdown_pass and pf_pass and sufficient,
+        all_pass=sharpe_pass and drawdown_pass and pf_pass and slippage_pass and sufficient,
     )
 
 
@@ -569,7 +586,8 @@ def generate_report(
     correlation_report = (
         analyze_correlations(strategy_returns) if len(strategy_returns) >= 2 else None
     )
-    validation_result = validate(performance, thresholds)
+    avg_slippage_rate = analyze_slippage_rate(trades_df)
+    validation_result = validate(performance, thresholds, avg_slippage_rate)
 
     # Determine data range
     data_start = None
@@ -730,9 +748,10 @@ def format_report(report: PaperReport) -> str:
         [
             "",
             "Go/No-Go Validation:",
-            f"  [{'PASS' if val.sharpe_pass else 'FAIL'}] Sharpe >= 0.5",
-            f"  [{'PASS' if val.drawdown_pass else 'FAIL'}] Max DD <= 15%",
+            f"  [{'PASS' if val.sharpe_pass else 'FAIL'}] Sharpe >= 0.8",
+            f"  [{'PASS' if val.drawdown_pass else 'FAIL'}] Max DD <= 20%",
             f"  [{'PASS' if val.profit_factor_pass else 'FAIL'}] Profit Factor >= 1.1",
+            f"  [{'PASS' if val.slippage_pass else 'FAIL'}] Avg Slippage <= 0.1%",
             f"  [{'PASS' if val.sufficient_data else 'FAIL'}] Sufficient Data (10+ cycles)",
             "",
         ]

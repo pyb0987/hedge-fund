@@ -22,7 +22,7 @@ def format_cycle_html(
     """Format cycle summary as Telegram HTML message."""
     status = "BLOCKED" if risk_blocked else "OK"
     lines = [
-        f"<b>Paper Trading Cycle</b>",
+        "<b>Paper Trading Cycle</b>",
         f"{timestamp:%Y-%m-%d %H:%M}",
         "",
         f"Status: {status}",
@@ -98,6 +98,7 @@ def format_daily_digest_html(report: PaperReport) -> str:
         f"  Sharpe: {perf.sharpe_ratio:.2f} [{check(val.sharpe_pass)}]",
         f"  Max DD: {perf.max_drawdown:.1%} [{check(val.drawdown_pass)}]",
         f"  PF: {perf.profit_factor:.2f} [{check(val.profit_factor_pass)}]",
+        f"  Slippage: [{check(val.slippage_pass)}]",
         f"  Return: {perf.total_return:.2%}",
         f"  Sortino: {perf.sortino_ratio:.2f}",
         f"  Win Rate: {perf.win_rate:.0%}",
@@ -105,26 +106,24 @@ def format_daily_digest_html(report: PaperReport) -> str:
     ]
 
     if perf.insufficient_data:
-        lines.append(f"  (need 10+ cycles)")
+        lines.append("  (need 10+ cycles)")
 
-    lines.extend([
-        "",
-        "<b>4. Risk Compliance</b>",
-        f"  Max Observed DD: {risk.max_observed_drawdown:.1%}",
-        f"  DD Activations: {risk.drawdown_activations}",
-        f"  Risk Rejections: {risk.risk_rejections}",
-        f"  Cycles Blocked: {risk.cycles_blocked}",
-        "",
-        f"<b>Overall: {overall}</b>",
-    ])
+    lines.extend(
+        [
+            "",
+            "<b>4. Risk Compliance</b>",
+            f"  Max Observed DD: {risk.max_observed_drawdown:.1%}",
+            f"  DD Activations: {risk.drawdown_activations}",
+            f"  Risk Rejections: {risk.risk_rejections}",
+            f"  Cycles Blocked: {risk.cycles_blocked}",
+            "",
+            f"<b>Overall: {overall}</b>",
+        ]
+    )
 
     return "\n".join(lines)
 
 
 def _escape_html(text: str) -> str:
     """Escape HTML special characters for Telegram."""
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
