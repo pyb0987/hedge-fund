@@ -8,7 +8,7 @@
 - Quarter-Kelly position sizing (full Kelly 금지 — 생존 우선)
 - Executor Protocol (runtime_checkable) — Paper/Upbit/Alpaca 구현체
 - Order에 `price` 필드 = 주문 생성 시점 시장가 (limit_price, filled_price와 구분)
-- **4전략 + 현금 10%**: crypto(10%), etf_mr(20%), dual_mom(15%), treasury_park(45% BIL)
+- **4전략 + 현금 3%**: crypto(10%), etf_mr(40%), dual_mom(10%), treasury_park(37% BIL)
 - **market_hedge NO-GO**: 코드 유지하되 allocation=0 (SPY+SH 충돌, 변동성 감쇠)
 - **교차 전략 심볼 합산 노출 관리**: max_symbol_exposure=20% (BTC 과집중 방지)
 - **SHORT 시그널 지원**: order_builder에서 Alpaca SHORT 주문 생성 가능
@@ -44,14 +44,14 @@
 ## Strategies
 | Strategy | Allocation | Exchange | Direction | 역할 |
 |----------|-----------|----------|-----------|------|
-| crypto_momentum | 10% | Upbit | Long-only | 크립토 모멘텀 |
-| etf_mean_reversion | 20% | Alpaca | Long-only | ETF 평균회귀 |
-| dual_momentum | 15% | Both | Long + 방어 바스켓 | 교차자산 모멘텀 |
+| crypto_momentum | 10% | Upbit | Long-only | vol-adjusted 랭킹 + momentum-proportional 가중 |
+| etf_mean_reversion | 40% | Alpaca | Long-only | z-score MR + vol-proportional 가중 (z_entry=-1.1) |
+| dual_momentum | 10% | Both | Long + 방어 바스켓 | vol-adjusted 교차자산 모멘텀 |
 | market_hedge | 0% (NO-GO) | Alpaca | 비활성 | SPY+SH 충돌 |
-| treasury_park | 45% | Alpaca | BIL 상시 홀딩 | 유휴 현금 → 무위험 수익 |
-| pairs_trading | 0% (조건부) | Alpaca | Long-short 쌍 | market-neutral alpha (WF 검증 후 활성화) |
-| sector_momentum | 0% (조건부) | Alpaca | Long-only 섹터 ETF | optimize로 검증 후 활성화 |
-| 현금 버퍼 | 10% | - | - | 긴급 리밸런싱 여유 |
+| treasury_park | 37% | Alpaca | BIL 상시 홀딩 | 유휴 현금 → 무위험 수익 |
+| pairs_trading | 0% (비활성) | Alpaca | Long-short 쌍 | alpha 파괴 확인 → 비활성 |
+| sector_momentum | 0% (조건부) | Alpaca | Long-only 섹터 ETF | evaluator 데이터 부재 |
+| 현금 버퍼 | 3% | - | - | 최소 리밸런싱 여유 |
 
 ## Risk Limits
 - Max DD: 20%, 단일 포지션: 15%, 전략 배분: 40%, 심볼 합산: 20%
@@ -61,8 +61,8 @@
 - Config: `config/settings.yaml`, `config/strategies/*.yaml`
 - Core: `src/hedgefund/core/` (models, enums, exceptions, risk_metrics, kelly)
 - Strategies: `src/hedgefund/strategies/` (base, crypto_momentum, etf_mean_reversion, dual_momentum, market_hedge, treasury_park, sector_momentum, pairs_trading, registry)
-- Backtest: `src/hedgefund/backtest/` (engine, walk_forward, metrics, deflated_sharpe)
-- Risk: `src/hedgefund/risk/` (manager, limits, drawdown, position_sizer)
+- Backtest: `src/hedgefund/backtest/` (engine, walk_forward, portfolio_backtest, metrics, deflated_sharpe)
+- Risk: `src/hedgefund/risk/` (manager, limits, drawdown, position_sizer, beta_hedge)
 - Portfolio: `src/hedgefund/portfolio/` (manager, allocator, correlation, rebalancer)
 - Execution: `src/hedgefund/execution/` (protocols, cost_model, order_builder, state, executors/)
 - App: `src/hedgefund/app.py` (wiring), `cli.py` (typer), `__main__.py`
