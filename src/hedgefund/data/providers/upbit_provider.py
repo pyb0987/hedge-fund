@@ -2,8 +2,6 @@
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime
 
 import pandas as pd
@@ -11,6 +9,7 @@ import pyupbit
 import requests
 
 from hedgefund.core.exceptions import DataProviderError, InsufficientDataError
+from hedgefund.core.timeout import call_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +70,16 @@ class UpbitProvider:
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 time.sleep(_RATE_LIMIT_DELAY)
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(
-                        pyupbit.get_ohlcv, symbol, interval=upbit_interval, count=count
-                    )
-                    df = future.result(timeout=_API_TIMEOUT)
-            except FuturesTimeout:
-                raise DataProviderError(f"Upbit API timeout ({_API_TIMEOUT}s) for {symbol}")
+                df = call_with_timeout(
+                    pyupbit.get_ohlcv,
+                    timeout=_API_TIMEOUT,
+                    args=(symbol,),
+                    kwargs={"interval": upbit_interval, "count": count},
+                )
+            except TimeoutError:
+                raise DataProviderError(
+                    f"Upbit API timeout ({_API_TIMEOUT}s) for {symbol}"
+                ) from None
             except Exception as e:
                 raise DataProviderError(f"Upbit API error for {symbol}: {e}") from e
 
@@ -126,11 +128,15 @@ class UpbitProvider:
     def get_available_symbols(self) -> list[str]:
         """Get KRW market tickers from Upbit."""
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(pyupbit.get_tickers, fiat="KRW")
-                tickers = future.result(timeout=_API_TIMEOUT)
-        except FuturesTimeout:
-            raise DataProviderError(f"Upbit tickers API timeout ({_API_TIMEOUT}s)")
+            tickers = call_with_timeout(
+                pyupbit.get_tickers,
+                timeout=_API_TIMEOUT,
+                kwargs={"fiat": "KRW"},
+            )
+        except TimeoutError:
+            raise DataProviderError(
+                f"Upbit tickers API timeout ({_API_TIMEOUT}s)"
+            ) from None
         except Exception as e:
             raise DataProviderError(f"Failed to get Upbit tickers: {e}") from e
 

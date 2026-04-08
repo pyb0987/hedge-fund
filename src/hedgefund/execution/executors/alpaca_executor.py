@@ -11,10 +11,16 @@ from datetime import datetime
 from hedgefund.core.enums import Exchange, OrderSide, OrderStatus
 from hedgefund.core.exceptions import ExecutionError
 from hedgefund.core.models import Order
+from hedgefund.core.timeout import call_with_timeout
 from hedgefund.execution.cost_model import estimate_commission, estimate_slippage
 from hedgefund.execution.protocols import AccountInfo, ExecutionResult
 
 logger = logging.getLogger(__name__)
+
+# Order submission must NOT be retried — Alpaca market orders are not idempotent.
+# A retry after a network blip can produce a duplicate fill.
+_ORDER_TIMEOUT = 30  # seconds, single attempt
+_QUERY_TIMEOUT = 15  # seconds for read-only calls (account, positions, quote)
 
 
 class AlpacaExecutor:
@@ -43,9 +49,11 @@ class AlpacaExecutor:
     def _validate_connection(self) -> None:
         """Verify API keys are valid."""
         try:
-            account = self._api.get_account()
+            account = call_with_timeout(self._api.get_account, timeout=_QUERY_TIMEOUT)
             if account.status != "ACTIVE":
                 raise ExecutionError(f"Alpaca account not active: {account.status}")
+        except TimeoutError as e:
+            raise ExecutionError(f"Alpaca connection timeout: {e}") from e
         except Exception as e:
             raise ExecutionError(f"Alpaca connection failed: {e}") from e
 
@@ -61,12 +69,16 @@ class AlpacaExecutor:
             side = "buy" if order.side == OrderSide.BUY else "sell"
 
             # Use notional (dollar amount) for buys, qty for sells
-            alpaca_order = self._api.submit_order(
-                symbol=order.symbol,
-                qty=order.quantity,
-                side=side,
-                type="market",
-                time_in_force="day",
+            alpaca_order = call_with_timeout(
+                self._api.submit_order,
+                timeout=_ORDER_TIMEOUT,
+                kwargs={
+                    "symbol": order.symbol,
+                    "qty": order.quantity,
+                    "side": side,
+                    "type": "market",
+                    "time_in_force": "day",
+                },
             )
 
             # Market orders fill quickly — get details
@@ -96,6 +108,16 @@ class AlpacaExecutor:
                 timestamp=now,
             )
 
+        except TimeoutError as e:
+            # Order status is UNKNOWN — the order may or may not have reached
+            # Alpaca. Mark REJECTED but flag for manual reconciliation.
+            logger.error("Alpaca order TIMEOUT — status unknown, manual check needed: %s", e)
+            return ExecutionResult(
+                order=replace(order, status=OrderStatus.REJECTED),
+                success=False,
+                timestamp=now,
+                error_message=f"TIMEOUT_UNKNOWN_STATE: {e}",
+            )
         except Exception as e:
             logger.exception("Alpaca order error")
             return ExecutionResult(
@@ -108,7 +130,7 @@ class AlpacaExecutor:
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a pending Alpaca order."""
         try:
-            self._api.cancel_order(order_id)
+            call_with_timeout(self._api.cancel_order, timeout=_QUERY_TIMEOUT, args=(order_id,))
             return True
         except Exception:
             logger.exception("Failed to cancel Alpaca order %s", order_id)
@@ -117,8 +139,8 @@ class AlpacaExecutor:
     def get_account_info(self) -> AccountInfo:
         """Get Alpaca account balance and positions."""
         try:
-            account = self._api.get_account()
-            positions = self._api.list_positions()
+            account = call_with_timeout(self._api.get_account, timeout=_QUERY_TIMEOUT)
+            positions = call_with_timeout(self._api.list_positions, timeout=_QUERY_TIMEOUT)
 
             pos_dict: dict[str, float] = {}
             for pos in positions:
@@ -137,7 +159,9 @@ class AlpacaExecutor:
     def get_current_price(self, symbol: str) -> float:
         """Get latest price from Alpaca."""
         try:
-            quote = self._api.get_latest_quote(symbol)
+            quote = call_with_timeout(
+                self._api.get_latest_quote, timeout=_QUERY_TIMEOUT, args=(symbol,)
+            )
             return float(quote.ap) if quote else 0.0  # ask price
         except Exception:
             logger.warning("Failed to get Alpaca price for %s", symbol)

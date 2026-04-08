@@ -14,10 +14,11 @@ import json
 import logging
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
+
+from hedgefund.core.timeout import call_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +96,18 @@ def run_daily_cycle(
 
     # Step 1: Run paper trading cycle (with timeout safety net)
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(run_once, config_dir=config_dir, dry_run=False)
-            result = future.result(timeout=_CYCLE_TIMEOUT)
+        result = call_with_timeout(
+            run_once,
+            timeout=_CYCLE_TIMEOUT,
+            kwargs={"config_dir": config_dir, "dry_run": False},
+        )
         logger.info(
             "Paper run complete: signals=%d, trades=%d, value=%.0f",
             len(result.cycle_result.signals),
             result.cycle_result.num_trades,
             result.portfolio_value,
         )
-    except FuturesTimeout:
+    except TimeoutError:
         logger.error("Paper run timed out after %ds", _CYCLE_TIMEOUT)
         _send_error_notification(
             config_dir,

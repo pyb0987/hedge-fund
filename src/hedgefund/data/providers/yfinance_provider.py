@@ -1,13 +1,12 @@
 """Yahoo Finance data provider — fetches US ETF/stock OHLCV via yfinance."""
 
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta
 
 import pandas as pd
 import yfinance as yf
 
 from hedgefund.core.exceptions import DataProviderError, InsufficientDataError
+from hedgefund.core.timeout import call_with_timeout
 
 _API_TIMEOUT = 30  # seconds per API call
 
@@ -63,11 +62,15 @@ class YFinanceProvider:
 
         try:
             ticker = yf.Ticker(symbol)
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(ticker.history, period=period, interval=yf_interval)
-                df = future.result(timeout=_API_TIMEOUT)
-        except FuturesTimeout:
-            raise DataProviderError(f"yfinance API timeout ({_API_TIMEOUT}s) for {symbol}")
+            df = call_with_timeout(
+                ticker.history,
+                timeout=_API_TIMEOUT,
+                kwargs={"period": period, "interval": yf_interval},
+            )
+        except TimeoutError:
+            raise DataProviderError(
+                f"yfinance API timeout ({_API_TIMEOUT}s) for {symbol}"
+            ) from None
         except Exception as e:
             raise DataProviderError(f"yfinance error for {symbol}: {e}") from e
 
@@ -94,16 +97,19 @@ class YFinanceProvider:
 
         try:
             ticker = yf.Ticker(symbol)
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    ticker.history,
-                    start=start_with_buffer.strftime("%Y-%m-%d"),
-                    end=(end + timedelta(days=1)).strftime("%Y-%m-%d"),
-                    interval=yf_interval,
-                )
-                df = future.result(timeout=_API_TIMEOUT)
-        except FuturesTimeout:
-            raise DataProviderError(f"yfinance API timeout ({_API_TIMEOUT}s) for {symbol}")
+            df = call_with_timeout(
+                ticker.history,
+                timeout=_API_TIMEOUT,
+                kwargs={
+                    "start": start_with_buffer.strftime("%Y-%m-%d"),
+                    "end": (end + timedelta(days=1)).strftime("%Y-%m-%d"),
+                    "interval": yf_interval,
+                },
+            )
+        except TimeoutError:
+            raise DataProviderError(
+                f"yfinance API timeout ({_API_TIMEOUT}s) for {symbol}"
+            ) from None
         except Exception as e:
             raise DataProviderError(f"yfinance error for {symbol}: {e}") from e
 

@@ -13,10 +13,17 @@ import pyupbit
 from hedgefund.core.enums import Exchange, OrderSide, OrderStatus
 from hedgefund.core.exceptions import ExecutionError
 from hedgefund.core.models import Order
+from hedgefund.core.timeout import call_with_timeout
 from hedgefund.execution.cost_model import estimate_commission, estimate_slippage
 from hedgefund.execution.protocols import AccountInfo, ExecutionResult
 
 logger = logging.getLogger(__name__)
+
+# Order submission must NOT be retried — Upbit market orders are not idempotent
+# and a retry after a network blip can produce a duplicate fill. Use a generous
+# single-shot timeout instead.
+_ORDER_TIMEOUT = 30  # seconds, single attempt
+_QUERY_TIMEOUT = 15  # seconds for read-only calls (balances, price)
 
 
 class UpbitExecutor:
@@ -31,9 +38,11 @@ class UpbitExecutor:
     def _validate_connection(self) -> None:
         """Verify API keys are valid."""
         try:
-            balances = self._upbit.get_balances()
+            balances = call_with_timeout(self._upbit.get_balances, timeout=_QUERY_TIMEOUT)
             if balances is None:
                 raise ExecutionError("Failed to connect to Upbit API")
+        except TimeoutError as e:
+            raise ExecutionError(f"Upbit connection timeout: {e}") from e
         except Exception as e:
             raise ExecutionError(f"Upbit connection failed: {e}") from e
 
@@ -49,9 +58,17 @@ class UpbitExecutor:
             if order.side == OrderSide.BUY:
                 # Upbit buy: specify total KRW to spend
                 trade_value = order.quantity * order.price
-                result = self._upbit.buy_market_order(order.symbol, trade_value)
+                result = call_with_timeout(
+                    self._upbit.buy_market_order,
+                    timeout=_ORDER_TIMEOUT,
+                    args=(order.symbol, trade_value),
+                )
             elif order.side == OrderSide.SELL:
-                result = self._upbit.sell_market_order(order.symbol, order.quantity)
+                result = call_with_timeout(
+                    self._upbit.sell_market_order,
+                    timeout=_ORDER_TIMEOUT,
+                    args=(order.symbol, order.quantity),
+                )
             else:
                 return ExecutionResult(
                     order=replace(order, status=OrderStatus.REJECTED),
@@ -97,6 +114,16 @@ class UpbitExecutor:
                 timestamp=now,
             )
 
+        except TimeoutError as e:
+            # Order status is UNKNOWN — the order may or may not have reached
+            # Upbit. We mark REJECTED but flag the message for manual reconciliation.
+            logger.error("Upbit order TIMEOUT — status unknown, manual check needed: %s", e)
+            return ExecutionResult(
+                order=replace(order, status=OrderStatus.REJECTED),
+                success=False,
+                timestamp=now,
+                error_message=f"TIMEOUT_UNKNOWN_STATE: {e}",
+            )
         except Exception as e:
             logger.exception("Upbit order error")
             return ExecutionResult(
@@ -109,7 +136,9 @@ class UpbitExecutor:
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a pending Upbit order."""
         try:
-            result = self._upbit.cancel_order(order_id)
+            result = call_with_timeout(
+                self._upbit.cancel_order, timeout=_QUERY_TIMEOUT, args=(order_id,)
+            )
             return result is not None and "error" not in result
         except Exception:
             logger.exception("Failed to cancel Upbit order %s", order_id)
@@ -117,7 +146,10 @@ class UpbitExecutor:
 
     def get_account_info(self) -> AccountInfo:
         """Get Upbit account balance and positions."""
-        balances = self._upbit.get_balances()
+        try:
+            balances = call_with_timeout(self._upbit.get_balances, timeout=_QUERY_TIMEOUT)
+        except TimeoutError as e:
+            raise ExecutionError(f"Upbit get_balances timeout: {e}") from e
         if balances is None:
             raise ExecutionError("Failed to get Upbit balances")
 
@@ -151,7 +183,9 @@ class UpbitExecutor:
     def get_current_price(self, symbol: str) -> float:
         """Get current price from Upbit."""
         try:
-            price = pyupbit.get_current_price(symbol)
+            price = call_with_timeout(
+                pyupbit.get_current_price, timeout=_QUERY_TIMEOUT, args=(symbol,)
+            )
             return float(price) if price is not None else 0.0
         except Exception:
             logger.warning("Failed to get price for %s", symbol)
