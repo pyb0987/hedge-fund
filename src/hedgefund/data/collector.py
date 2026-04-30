@@ -65,7 +65,8 @@ class DataCollector:
 
         for strategy_name, strategy in self._strategies.items():
             strategy_data, strategy_errors = self._collect_for_strategy(
-                strategy, count,
+                strategy,
+                count,
             )
             all_data[strategy_name] = strategy_data
             errors.extend(strategy_errors)
@@ -98,9 +99,7 @@ class DataCollector:
         for symbol in universe:
             provider = self._resolve_provider(symbol)
             if provider is None:
-                errors.append(
-                    f"{strategy.name}/{symbol}: no provider found"
-                )
+                errors.append(f"{strategy.name}/{symbol}: no provider found")
                 continue
 
             try:
@@ -121,8 +120,8 @@ class DataCollector:
 
         Convention:
         - KRW-* symbols → upbit provider
-        - Otherwise → yfinance provider
+        - Otherwise → us_etf provider (Alpaca primary, yfinance fallback)
         """
         if symbol.startswith("KRW-"):
             return self._providers.get("upbit")
-        return self._providers.get("yfinance")
+        return self._providers.get("us_etf")

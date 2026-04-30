@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 from hedgefund.app import (
     _filter_strategies_for_market_hours,
@@ -163,12 +162,11 @@ costs:
             def get_available_symbols(self):
                 return ["SPY"]
 
-        mock_providers.return_value = {"yfinance": FakeYFinance()}
+        mock_providers.return_value = {"us_etf": FakeYFinance()}
 
         result = run_once(config_dir=config_dir, dry_run=True)
 
         assert result.portfolio_value >= 0
         assert result.timestamp is not None
         # Dry run: no state files should be created
-        from hedgefund.app import UPBIT_STATE, ALPACA_STATE
         # State files may not exist because dry_run=True skips saving

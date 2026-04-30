@@ -3,9 +3,8 @@
 from datetime import datetime
 
 import pandas as pd
-import pytest
 
-from hedgefund.core.enums import Exchange, SignalDirection
+from hedgefund.core.enums import Exchange
 from hedgefund.core.models import Signal
 from hedgefund.data.collector import DataCollector
 
@@ -26,7 +25,9 @@ class FakeProvider:
             return self._data[symbol]
         return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
-    def get_ohlcv_range(self, symbol: str, start: datetime, end: datetime, interval: str = "day") -> pd.DataFrame:
+    def get_ohlcv_range(
+        self, symbol: str, start: datetime, end: datetime, interval: str = "day"
+    ) -> pd.DataFrame:
         return self.get_ohlcv(symbol, interval)
 
     def get_available_symbols(self) -> list[str]:
@@ -100,7 +101,7 @@ class TestDataCollector:
 
         providers = {
             "upbit": FakeProvider("upbit", {"KRW-BTC": btc_df}),
-            "yfinance": FakeProvider("yfinance", {"SPY": spy_df}),
+            "us_etf": FakeProvider("us_etf", {"SPY": spy_df}),
         }
         strategies = {
             "crypto_momentum": FakeStrategy("crypto_momentum", Exchange.UPBIT, ["KRW-BTC"]),
@@ -158,7 +159,7 @@ class TestDataCollector:
         """KRW-* symbols resolve to upbit provider."""
         providers = {
             "upbit": FakeProvider("upbit", {"KRW-BTC": _make_ohlcv()}),
-            "yfinance": FakeProvider("yfinance"),
+            "us_etf": FakeProvider("us_etf"),
         }
         strategies = {
             "test": FakeStrategy("test", Exchange.UPBIT, ["KRW-BTC"]),
@@ -169,11 +170,11 @@ class TestDataCollector:
 
         assert "KRW-BTC" in result.data["test"]
 
-    def test_resolve_provider_etf_to_yfinance(self):
-        """Non-KRW symbols resolve to yfinance provider."""
+    def test_resolve_provider_etf_to_us_etf(self):
+        """Non-KRW symbols resolve to us_etf provider (Alpaca/yfinance)."""
         providers = {
             "upbit": FakeProvider("upbit"),
-            "yfinance": FakeProvider("yfinance", {"SPY": _make_ohlcv(30, 450.0)}),
+            "us_etf": FakeProvider("us_etf", {"SPY": _make_ohlcv(30, 450.0)}),
         }
         strategies = {
             "test": FakeStrategy("test", Exchange.ALPACA, ["SPY"]),
@@ -192,7 +193,7 @@ class TestDataCollector:
 
         providers = {
             "upbit": FakeProvider("upbit", {"KRW-BTC": btc_df}),
-            "yfinance": FakeProvider("yfinance", {"SPY": spy_df, "TLT": tlt_df}),
+            "us_etf": FakeProvider("us_etf", {"SPY": spy_df, "TLT": tlt_df}),
         }
         strategies = {
             "dual_momentum": FakeStrategy(

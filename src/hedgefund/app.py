@@ -103,14 +103,37 @@ def _create_paper_executors(
 
 
 def _create_providers() -> dict[str, DataProvider]:
-    """Create data providers (lazy import to avoid API deps at import time)."""
-    from hedgefund.data.providers.upbit_provider import UpbitProvider
-    from hedgefund.data.providers.yfinance_provider import YFinanceProvider
+    """Create data providers (lazy import to avoid API deps at import time).
 
-    return {
-        "upbit": UpbitProvider(),
-        "yfinance": YFinanceProvider(),
-    }
+    US ETF data: Alpaca (production source) when ALPACA_API_KEY/SECRET_KEY are set;
+    falls back to yfinance only when the keys are missing.
+    """
+    import os
+
+    from hedgefund.data.providers.upbit_provider import UpbitProvider
+
+    providers: dict[str, DataProvider] = {"upbit": UpbitProvider()}
+
+    api_key = os.environ.get("ALPACA_API_KEY", "")
+    secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
+    base_url = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+
+    if api_key and secret_key:
+        from hedgefund.data.providers.alpaca_provider import AlpacaProvider
+
+        providers["us_etf"] = AlpacaProvider(
+            api_key=api_key, secret_key=secret_key, base_url=base_url
+        )
+        logger.info("US ETF data provider: Alpaca (%s)", base_url)
+    else:
+        from hedgefund.data.providers.yfinance_provider import YFinanceProvider
+
+        providers["us_etf"] = YFinanceProvider()
+        logger.warning(
+            "ALPACA_API_KEY/ALPACA_SECRET_KEY missing — falling back to yfinance for US ETFs"
+        )
+
+    return providers
 
 
 def _restore_strategy_state(strategies: dict[str, Strategy]) -> None:
@@ -371,7 +394,7 @@ def _backfill_position_prices(
 
         backfilled: dict[str, float] = {}
         for sym in set(missing_symbols):
-            provider_key = "upbit" if sym.startswith("KRW-") else "yfinance"
+            provider_key = "upbit" if sym.startswith("KRW-") else "us_etf"
             provider = providers.get(provider_key)
             if provider is None:
                 continue
