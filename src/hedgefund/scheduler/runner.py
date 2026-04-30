@@ -149,9 +149,12 @@ def run_daily_cycle(
                     enabled=True,
                 )
             )
-            notifier.notify_daily_digest(report)
+            sent = notifier.notify_daily_digest(report)
             notifier.close()
-            logger.info("Telegram daily digest sent")
+            if sent:
+                logger.info("Telegram daily digest sent")
+            else:
+                logger.warning("Telegram daily digest not delivered — see prior errors")
     except Exception:
         logger.exception("Telegram digest failed — continuing")
 

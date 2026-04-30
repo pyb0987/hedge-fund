@@ -26,9 +26,7 @@ class TestTelegramNotifier:
         notifier.close()
 
     @patch("hedgefund.monitoring.telegram.httpx.Client")
-    def test_send_message_success(
-        self, mock_client_cls: MagicMock, config: TelegramConfig
-    ) -> None:
+    def test_send_message_success(self, mock_client_cls: MagicMock, config: TelegramConfig) -> None:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -64,9 +62,7 @@ class TestTelegramNotifier:
         notifier.close()
 
     @patch("hedgefund.monitoring.telegram.httpx.Client")
-    def test_notify_cycle(
-        self, mock_client_cls: MagicMock, config: TelegramConfig
-    ) -> None:
+    def test_notify_cycle(self, mock_client_cls: MagicMock, config: TelegramConfig) -> None:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -91,9 +87,7 @@ class TestTelegramNotifier:
         notifier.close()
 
     @patch("hedgefund.monitoring.telegram.httpx.Client")
-    def test_notify_risk_alert(
-        self, mock_client_cls: MagicMock, config: TelegramConfig
-    ) -> None:
+    def test_notify_risk_alert(self, mock_client_cls: MagicMock, config: TelegramConfig) -> None:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -117,3 +111,81 @@ class TestTelegramNotifier:
         notifier = TelegramNotifier(config)
         notifier.close()
         # No exception = success
+
+    @patch("hedgefund.monitoring.telegram.time.sleep")
+    @patch("hedgefund.monitoring.telegram.httpx.Client")
+    def test_send_retries_on_transient_error_then_succeeds(
+        self,
+        mock_client_cls: MagicMock,
+        mock_sleep: MagicMock,
+        config: TelegramConfig,
+    ) -> None:
+        """ConnectError on first try, success on second — message goes through."""
+        import httpx
+
+        mock_client = MagicMock()
+        ok_response = MagicMock()
+        ok_response.raise_for_status = MagicMock()
+        mock_client.post.side_effect = [
+            httpx.ConnectError("dns lookup failed"),
+            ok_response,
+        ]
+        mock_client_cls.return_value = mock_client
+
+        notifier = TelegramNotifier(config)
+        result = notifier.send_message("Hello")
+
+        assert result is True
+        assert mock_client.post.call_count == 2
+        assert mock_sleep.call_count == 1
+        notifier.close()
+
+    @patch("hedgefund.monitoring.telegram.time.sleep")
+    @patch("hedgefund.monitoring.telegram.httpx.Client")
+    def test_send_gives_up_after_max_attempts(
+        self,
+        mock_client_cls: MagicMock,
+        mock_sleep: MagicMock,
+        config: TelegramConfig,
+    ) -> None:
+        """All attempts hit transient errors → False, no extra calls."""
+        import httpx
+
+        mock_client = MagicMock()
+        mock_client.post.side_effect = httpx.ReadTimeout("read timed out")
+        mock_client_cls.return_value = mock_client
+
+        notifier = TelegramNotifier(config)
+        result = notifier.send_message("Hello")
+
+        assert result is False
+        assert mock_client.post.call_count == TelegramNotifier._MAX_ATTEMPTS
+        assert mock_sleep.call_count == TelegramNotifier._MAX_ATTEMPTS - 1
+        notifier.close()
+
+    @patch("hedgefund.monitoring.telegram.time.sleep")
+    @patch("hedgefund.monitoring.telegram.httpx.Client")
+    def test_send_does_not_retry_4xx(
+        self,
+        mock_client_cls: MagicMock,
+        mock_sleep: MagicMock,
+        config: TelegramConfig,
+    ) -> None:
+        """HTTP 4xx (auth/bad request) is not transient — fail fast, no retry."""
+        import httpx
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401 Unauthorized", request=MagicMock(), response=MagicMock(status_code=401)
+        )
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value = mock_client
+
+        notifier = TelegramNotifier(config)
+        result = notifier.send_message("Hello")
+
+        assert result is False
+        mock_client.post.assert_called_once()
+        mock_sleep.assert_not_called()
+        notifier.close()
