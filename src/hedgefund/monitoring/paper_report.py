@@ -455,13 +455,20 @@ def _compute_avg_holding_days(strat_df: pd.DataFrame) -> float:
     return float(np.mean(days)) if days else 0.0
 
 
+_MAX_GAP_DAYS = 4  # Allow Fri→Mon weekend bridge; longer gap = re-entry, drop pair
+_MAX_DAILY_RETURN = 0.5  # |r| > 50% in one day = data error / re-entry, drop
+
+
 def build_strategy_daily_returns(
     position_snapshots_df: pd.DataFrame,
 ) -> dict[str, NDArray[np.float64]]:
     """Build daily return series per strategy from position snapshots.
 
-    Groups market_value by (date, strategy_name), then computes daily
-    pct_change for consecutive days where the strategy held positions.
+    For each strategy, emits a return only between consecutive snapshot dates
+    where (a) both market_values are positive, (b) the date gap is small enough
+    that the prior value still values the same position, and (c) the resulting
+    return is finite and below the sanity cap. Re-entries from $0 → large
+    market_value are NOT returns and are explicitly dropped.
     """
     if position_snapshots_df.empty:
         return {}
@@ -469,21 +476,27 @@ def build_strategy_daily_returns(
     df = position_snapshots_df.copy()
     df["date"] = pd.to_datetime(df.index).normalize()
 
-    # Sum market_value per (date, strategy)
     daily = df.groupby(["date", "strategy_name"])["market_value"].sum()
-    daily = daily.unstack(level="strategy_name", fill_value=0.0)
+    daily = daily.unstack(level="strategy_name", fill_value=0.0).sort_index()
 
     strategy_returns: dict[str, NDArray[np.float64]] = {}
+    dates = daily.index
     for name in sorted(daily.columns):
         values = daily[name].values.astype(np.float64)
-        nonzero = values > 0
-        if nonzero.sum() < 2:
-            continue
-        nz_values = values[nonzero]
-        returns = np.diff(nz_values) / nz_values[:-1]
-        returns = returns[np.isfinite(returns)]
-        if len(returns) > 0:
-            strategy_returns[name] = returns
+        rets: list[float] = []
+        for i in range(1, len(values)):
+            v_prev, v_curr = values[i - 1], values[i]
+            if v_prev <= 0 or v_curr <= 0:
+                continue
+            gap = (dates[i] - dates[i - 1]).days
+            if gap < 1 or gap > _MAX_GAP_DAYS:
+                continue
+            r = (v_curr - v_prev) / v_prev
+            if not np.isfinite(r) or abs(r) > _MAX_DAILY_RETURN:
+                continue
+            rets.append(r)
+        if rets:
+            strategy_returns[name] = np.asarray(rets, dtype=np.float64)
 
     return strategy_returns
 

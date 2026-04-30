@@ -280,14 +280,57 @@ class TestBuildStrategyDailyReturns:
         assert len(result["crypto"]) == 2
         assert result["crypto"][0] == pytest.approx(0.1)
 
-    def test_skips_zero_values(self) -> None:
-        """Strategy with gap (sold all, re-entered) computes returns only from nonzero days."""
+    def test_reentry_does_not_emit_phantom_return(self) -> None:
+        """Re-entry from $0 to a large value is NOT a daily return.
+
+        Previous bug: nonzero compression made $0 → $120 look like a 20% gain
+        and a $0 → $1e9 re-entry produced overflow-scale Sharpe.
+        """
         df = _make_position_snapshots({"A": [100.0, 0.0, 0.0, 120.0, 126.0]})
         result = build_strategy_daily_returns(df)
-        # nonzero: [100, 120, 126] → returns [0.2, 0.05]
-        assert len(result["A"]) == 2
-        assert result["A"][0] == pytest.approx(0.2)
-        assert result["A"][1] == pytest.approx(0.05)
+        # Only consecutive positive pair: 120 → 126 (5%)
+        assert len(result["A"]) == 1
+        assert result["A"][0] == pytest.approx(0.05)
+
+    def test_overflow_reentry_is_dropped(self) -> None:
+        """Pathological re-entry (0 → 1e6) must not produce a finite return."""
+        df = _make_position_snapshots({"A": [100.0, 0.0, 1_000_000.0, 1_010_000.0]})
+        result = build_strategy_daily_returns(df)
+        # 1e6 → 1.01e6 is the only valid pair (1%)
+        assert len(result["A"]) == 1
+        assert result["A"][0] == pytest.approx(0.01)
+
+    def test_huge_gap_skipped(self) -> None:
+        """Snapshots separated by a long gap should not bridge a return."""
+        df = pd.DataFrame(
+            [
+                {
+                    "timestamp": pd.Timestamp("2024-01-01"),
+                    "strategy_name": "A",
+                    "symbol": "X",
+                    "exchange": "t",
+                    "quantity": 1.0,
+                    "avg_entry_price": 100.0,
+                    "market_price": 100.0,
+                    "market_value": 100.0,
+                    "unrealized_pnl": 0.0,
+                },
+                {
+                    "timestamp": pd.Timestamp("2024-02-01"),
+                    "strategy_name": "A",
+                    "symbol": "X",
+                    "exchange": "t",
+                    "quantity": 1.0,
+                    "avg_entry_price": 100.0,
+                    "market_price": 200.0,
+                    "market_value": 200.0,
+                    "unrealized_pnl": 100.0,
+                },
+            ]
+        ).set_index("timestamp")
+        result = build_strategy_daily_returns(df)
+        # 31-day gap exceeds _MAX_GAP_DAYS — no return emitted
+        assert "A" not in result
 
 
 class TestAnalyzeStrategySharpes:
